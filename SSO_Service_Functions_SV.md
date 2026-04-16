@@ -21,9 +21,11 @@ En person är antingen patient eller professionell (olika inlogg om man råkar v
 
 - **Organisation (datascope)**: en individ kopplas till en **organisation** via åtkomst-/endorsmentflöden. Organisation används som **synlighets- och scopes-gräns** för data i nedströmstjänster (”du ser bara data från patienter registrerade på din organisation”). Man kan vara medlem i flera organisationer.
 
-- **Fas-behörighet via gruppmedlemskap**: privilegier ges per fas (**planning**, **request**, **provider**, **analysis**) genom att användaren har medlemskap i en grupp av rätt **`group_type`**. Endast medlemskap med **`status == 'approved'`** ska räknas. Man kan vara medlem i flera faser.
+- **Fas-behörighet (direkta grants)**: privilegier ges per fas (**planning**, **request**, **provider**, **analysis**) genom **direkta `UserPhase`-grants** som SU tilldelar per användare via `POST /api/admin/users/<guid>/phases`. Resultatet exponeras som listan `effective_phases` i access-blobben. Gruppmedlemskap **ger inte** fas-behörighet (beslut #57, 2026-04-15): en godkänd medlem i en grupp med `category = "planning"` får **inte** automatiskt `planning`-fasen — SU måste grant:a den explicit. Man kan ha flera faser samtidigt.
 
-- **Gruppadmin**: ett godkänt gruppmedlemskap kan ha flaggan **`is_admin`**. Det betyder administratörsbehörighet inom den gruppens fas (t.ex. ”Planning Admin”).
+- **Grupper (organisatorisk metadata)**: grupper är en organisatorisk/kategorisk indelning som är **oberoende** av fas-behörighet (#57). Varje grupp har en `category` (fri textsträng efter #60, tidigare en 4-värdes-enum `group_type`) som nedströmstjänster kan använda för UI-gruppering eller org-admin-checkar — men **aldrig** som en fas-access-signal. Endast medlemskap med **`status == 'approved'`** ska räknas vid gruppbaserad logik.
+
+- **Gruppadmin**: ett godkänt gruppmedlemskap kan ha flaggan **`is_admin`**. Det ger administratörsbehörighet **inom den specifika gruppen** — att godkänna/avslå väntande medlemsansökningar, skapa invite-tokens, osv. Det är **inte** fas-scopad admin och ger inga extra fas-grants.
 - **SU admin (superuser)**: om användaren är markerad som **SU admin** (`is_su_admin`) ska den behandlas som systemadministratör med breda rättigheter enligt policy/matris (t.ex. `oath_overview.csv` i helheten), och kan dessutom utföra administrativa funktioner i SSO-tjänsten.
 
 - **Tjänst-till-tjänst-läsning**: vissa profiluppslag kan kräva extra “service credentials” via headers (`X-SSO-Client-Id`, `X-SSO-Client-Secret`) utöver användarens Bearer-token.
@@ -74,7 +76,7 @@ För att nedströmstjänster ska kunna fatta beslut om rättigheter erbjuder SSO
 
 - Grundfält: användarens GUID, e-post, `user_type`, samt `is_su_admin`.
 - För patienter: `patient_guid`, `in_registry` och lista över `registries`.
-- För professionals: `professional_guid`, `professional_role`, en lista av `groups` (med `group_guid`, `group_type`, `status`, `is_admin`, m.m.) samt en beräknad lista av “effective phases”.
+- För professionals: `professional_guid`, `professional_role`, `organization_ids` (plus `organisation_warning` om listan är tom), en lista av `groups` (med `group_guid`, `group_name`, `category`, `status`, `is_admin`) samt en **`effective_phases`**-lista som **uteslutande** kommer från direkta `UserPhase`-grants (#57). Grupper och faser är oberoende kriterier — konsumenten kontrollerar fas-behörighet via `phase in blob["effective_phases"]` och läser `groups` bara för organisatorisk/kategorisk metadata.
 
 I praktiken är detta den primära mekanismen som konsumenttjänster använder för att översätta SSO-identitet till lokala roller/rättigheter.
 
@@ -95,17 +97,17 @@ Dessa funktioner är knutna till regeln “patient får bara göra patient-saker
 
 För professionals finns funktioner som beskriver hur man blir behörig i en fas:
 
-- En professional kan **begära medlemskap** i en grupp, vilket skapar ett “pending” medlemskap. Detta är ett sätt att säga “jag behöver behörighet i denna fas/grupp”.
-- En professional kan också **begära att bli gruppledare** (admin) för en grupp. Den begäran måste sedan beslutas av SU admin.
+- En professional kan **begära medlemskap** i en grupp, vilket skapar ett ”pending” medlemskap. Detta är ett sätt att säga ”jag vill ingå i denna organisatoriska gruppering”. Observera: medlemskap ger **inte** automatiskt fas-behörighet (#57) — fas-grants hanteras separat av SU.
+- En professional kan också **begära att bli gruppledare** (admin) för en grupp. Den begäran måste sedan beslutas av SU admin. Gruppledar-rollen är scopad till administration **inom gruppen** (godkänna medlemmar, skapa invites) — den ger inga fas-grants.
 - Det finns ett endpoint för **lösenordsbyte** för inloggade användare (med kontroll av current password och minsta längd på nytt lösenord).
 
 Gemensamt är att de här endpoints:en utgår från att användaren redan har en giltig token och att auktoriseringen görs utifrån `user_type` och rollen (professional).
 
 ## Gruppfunktioner: lista egna grupper, admin-beslut och inbjudningar
 
-Grupper är navet för fasbehörighet och tjänsten har därför flera gruppnära funktioner:
+Grupper är en organisatorisk/kategorisk indelning (oberoende av fas-behörighet efter #57) och tjänsten har därför flera gruppnära funktioner:
 
-- **Lista egna godkända grupper**: användaren kan få en lista över grupper där medlemskapet är “approved”. Detta används ofta av klienter för att snabbt avgöra om användaren har t.ex. planning-behörighet.
+- **Lista egna godkända grupper**: användaren kan få en lista över grupper där medlemskapet är ”approved”. Klienter använder detta för UI-gruppering eller org-admin-checkar — **inte** för att avgöra fas-behörighet (det görs via `effective_phases`).
 - **Group admin: lista pending membership requests**: en gruppadmin kan se väntande medlemsansökningar för sin grupp.
 - **Group admin: godkänna/avslå medlemskap**: en gruppadmin kan sätta status på ett pending medlemskap till approved eller rejected.
 - **Inbjudningar (invite links)**: gruppadmin eller SU admin kan skapa en tidsbegränsad invite-token. Den kan lösas in av en professional för att skapa ett pending medlemskap via “join-by-invite”. Detta är ett kontrollerat sätt att distribuera onboarding till grupper utan att användaren måste hitta gruppen manuellt.
@@ -132,7 +134,7 @@ För att kunna bygga onboardingflöden utan att först ha ett konto finns en “
 - Lista organisationsnamn för dropdowns.
 - Lista grupper (read-only katalog).
 - Lista group leaders (inklusive SU admins) för att kunna välja vem som ska endorsa en åtkomstansökan.
-- Skicka in en **access request**: en professional kan ange e-post, ett lösenord (minst 8 tecken), personuppgifter, organisation, vilka faser som behövs, samt välja en group leader/SU admin som ska besluta.
+- Skicka in en **access request**: en professional kan ange e-post, ett lösenord (minst 8 tecken), personuppgifter, organisation, vilka faser som önskas, samt välja en group leader/SU admin som ska besluta. Observera (#57): godkännande av en access request skapar användaren men ger **inte** automatiskt de önskade faserna — SU måste grant:a varje fas explicit via `POST /api/admin/users/<guid>/phases` som ett separat steg.
 
 Dessa endpoints har enkla rate limits och kort cache-TTL för att vara robusta mot överdriven last.
 
@@ -140,7 +142,7 @@ Dessa endpoints har enkla rate limits och kort cache-TTL för att vara robusta m
 
 En viktig funktion i tjänsten är att den standardiserar **identifierare**: API:er och integrationer ska använda GUID/UUID för användare, patienter, grupper, medlemskap etc. Interna DB-id:n är just interna. Det gör att konsumenttjänster kan lagra referenser stabilt utan att exponera interna id:n och utan att kräva gemensam DB.
 
-Tjänsten sammanställer dessutom “access blobben” (inkl. grupper, faser, adminflagga) så att konsumenttjänster kan fatta beslut enligt en extern rättighetsmatris (t.ex. `oath_overview.csv`) men med SSO som sanningskälla för identiteten.
+Tjänsten sammanställer dessutom ”access blobben” (inkl. grupper, faser, SU-flagga) så att konsumenttjänster kan fatta beslut enligt en extern rättighetsmatris (t.ex. `oath_overview.csv`) men med SSO som sanningskälla för identiteten. Efter #57 är `effective_phases` och `groups` **oberoende** fält i blobben — konsumenter som tidigare härledde fas-access från gruppmedlemskap måste uppdateras att läsa `effective_phases` direkt.
 
 ## Tekniska överväganden (samlat)
 
@@ -222,17 +224,20 @@ END
 IF resource.patient.organization_id NOT IN subject.organization_ids:
     → DENY
 
-# Steg 2 – fas-behörighet via grupp
+# Steg 2 – fas-behörighet (direkta UserPhase-grants, #57)
 REQUIRED_PHASE = map_action_to_phase(action)
 
-IF NOT EXISTS membership:
-    membership.group_type == REQUIRED_PHASE
-    AND membership.status == "approved":
-        → DENY
+IF REQUIRED_PHASE NOT IN subject.effective_phases:
+    → DENY
+# OBS: Gruppmedlemskap kontrolleras INTE här. Grupper är
+# organisatorisk metadata efter #57 — en "planning"-kategoriserad
+# grupp ger inte planning-fasen automatiskt, SU måste grant:a den.
 
-# Steg 3 – admin override (inom fas)
-IF membership.is_admin == true:
-    → ALLOW
+# Steg 3 – gruppadmin (inom-grupp-administration, inte fas-override)
+# Flaggan `is_admin` på ett godkänt medlemskap ger administratörs-
+# rättigheter INOM den specifika gruppen (godkänna medlemmar,
+# skapa invites). Den ger inga extra fas-grants eller
+# resurs-access utanför gruppens egna admin-endpoints.
 
 # Steg 4 – standard permissions (per tjänst)
 IF service_policy_allows(subject.role, action, resource):
@@ -263,19 +268,34 @@ IF request has X-SSO-Client-Id + Secret:
 Alla services får detta:
 
 {
+  "user_guid": "...",
+  "email": "...",
   "user_type": "patient | professional",
+  "is_su_admin": false,
+  "must_change_password": false,
+
+  // Patient-specifika fält
   "patient_guid": "...",
-  "organization_ids": [...],
+  "organisation_guid": "...",
   "in_registry": true,
   "registries": [...],
+
+  // Professional-specifika fält
+  "professional_guid": "...",
+  "professional_role": "doctor | nurse | other",
+  "organization_ids": [...],
   "groups": [
     {
-      "group_type": "planning",
+      "group_guid": "...",
+      "group_name": "Oncology Planning",
+      "category": "planning",   // fri textsträng efter #60; bara metadata
       "status": "approved",
-      "is_admin": false
+      "is_admin": false          // inom-grupp-admin, inte fas-admin
     }
   ],
-  "is_su_admin": false
+  // Fas-behörighet — ENDA källa är direkta UserPhase-grants (#57).
+  // Nedströms: `if "planning" in blob["effective_phases"]: …`
+  "effective_phases": ["planning", "analysis"]
 }
 
 
