@@ -1,7 +1,9 @@
 """Flask application factory — registers blueprints, DB, config, middleware."""
+import logging
 import time
 
 from flask import Flask, jsonify
+from werkzeug.exceptions import HTTPException
 
 from src.config import Config, TestConfig
 from src.db import init_db, close_db
@@ -35,6 +37,7 @@ def create_app(config_override=None):
             ALLOWED_ORIGINS=cfg.ALLOWED_ORIGINS,
             ALLOWED_CALLBACK_URLS=cfg.ALLOWED_CALLBACK_URLS,
             SERVICE_CREDENTIALS=cfg.SERVICE_CREDENTIALS,
+            INTERNAL_SERVICE_KEY=cfg.INTERNAL_SERVICE_KEY,
             WTF_CSRF_ENABLED=True,
             WTF_CSRF_SSL_STRICT=False,
         )
@@ -113,6 +116,48 @@ def create_app(config_override=None):
     from src.fhir.capability_statement import fhir_bp
     app.register_blueprint(fhir_bp)
 
+    from src.routes.internal import internal_bp
+    app.register_blueprint(internal_bp)
+
+    # Exempt API blueprints from CSRF — they use Bearer tokens, not cookies
+    from src.middleware.csrf import csrf
+    for bp in [auth_bp, patient_bp, groups_bp, admin_bp, public_bp, fhir_bp, internal_bp]:
+        csrf.exempt(bp)
+
+    # --- Error handlers: catch exceptions and log them ---
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        # Let werkzeug HTTPException subclasses (404, 405, 403, etc.) keep
+        # their native status + response instead of being coerced into 500.
+        # Ticket #58: previously any NotFound raised by routing fell through
+        # to the generic 500 branch, which broke test_docs_download_unknown_file_404.
+        if isinstance(e, HTTPException):
+            return e
+        app.logger.exception("Unhandled exception: %s", e)
+        return jsonify({"error": "internal_error", "message": str(e)}), 500
+
+    @app.errorhandler(500)
+    def handle_500(e):
+        app.logger.exception("500 error: %s", e)
+        return jsonify({"error": "internal_error", "message": "Internal server error"}), 500
+
+    # --- Configure logging for production ---
+    if not app.config.get('TESTING'):
+        log_dir = app.config.get('LOG_DIR', './logs')
+        import os
+        os.makedirs(log_dir, exist_ok=True)
+        file_handler = logging.FileHandler(os.path.join(log_dir, 'app.log'))
+        file_handler.setLevel(logging.WARNING)
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(levelname)s %(name)s: %(message)s'
+        ))
+        app.logger.addHandler(file_handler)
+        app.logger.setLevel(logging.INFO)
+        # Also log to stderr for gunicorn capture
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(logging.WARNING)
+        app.logger.addHandler(stream_handler)
+
     # --- Health endpoint (Phase 3.j) ---
     @app.route('/api/health')
     def health():
@@ -135,5 +180,117 @@ def create_app(config_override=None):
             "database": "connected" if db_ok else "unavailable",
             "uptime_seconds": uptime,
         }), code
+
+    # --- Service health aggregator (checks all registered services) ---
+    _health_cache = {'results': None, 'checked_at': 0}
+
+    def _check_one_service(svc, session, is_self=False):
+        """Check a single service's API health and frontend. Runs in a thread."""
+        import requests as _requests
+
+        name = svc.get('service_name', '')
+        health_url = svc.get('api_health_url', '')
+        service_url = svc.get('service_url', '')
+
+        entry = {
+            'service_name': name,
+            'api': 'unknown',
+            'db': 'unknown',
+            'frontend': 'unknown',
+        }
+
+        # SSO checking its own URLs deadlocks (single gunicorn worker is busy
+        # serving this request). Report self as ok since we're clearly running.
+        if is_self:
+            entry['api'] = 'ok'
+            entry['db'] = 'ok'
+            entry['frontend'] = 'ok'
+            return entry
+
+        if health_url and health_url != '\u2014':
+            try:
+                r = session.get(health_url, timeout=5)
+                if r.ok:
+                    entry['api'] = 'ok'
+                    try:
+                        data = r.json()
+                        db_status = data.get('database', '')
+                        if db_status == 'connected':
+                            entry['db'] = 'ok'
+                        elif db_status == 'unavailable':
+                            entry['db'] = 'down'
+                        elif data.get('status') == 'ok':
+                            entry['db'] = 'ok'
+                    except Exception:
+                        pass
+                else:
+                    entry['api'] = 'down'
+                    entry['db'] = 'unknown'
+            except _requests.exceptions.ConnectionError:
+                entry['api'] = 'down'
+                entry['db'] = 'unknown'
+            except _requests.exceptions.Timeout:
+                entry['api'] = 'timeout'
+                entry['db'] = 'unknown'
+            except Exception:
+                entry['api'] = 'error'
+
+        # Don't follow redirects — other services redirect to SSO for login,
+        # which deadlocks back to this single worker. A 2xx or 3xx means alive.
+        if service_url and service_url != '\u2014':
+            try:
+                r = session.get(service_url, timeout=5, allow_redirects=False)
+                entry['frontend'] = 'ok' if r.status_code < 500 else 'down'
+            except _requests.exceptions.ConnectionError:
+                entry['frontend'] = 'down'
+            except _requests.exceptions.Timeout:
+                entry['frontend'] = 'timeout'
+            except Exception:
+                entry['frontend'] = 'error'
+
+        return entry
+
+    @app.route('/api/service-health')
+    def service_health():
+        import csv as _csv
+        import os as _os
+        import requests as _requests
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Serve cached results if fresh (< 30 seconds old)
+        cache_max_age = 30
+        now = time.time()
+        if _health_cache['results'] and (now - _health_cache['checked_at']) < cache_max_age:
+            return jsonify({
+                'services': _health_cache['results'],
+                'interval_seconds': app.config.get('HEALTH_CHECK_INTERVAL', 300),
+                'checked_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(int(_health_cache['checked_at']))),
+                'cached': True,
+            })
+
+        oath_path = _os.path.join(app.root_path, '..', 'oath_overview.csv')
+        services = []
+        if _os.path.exists(oath_path):
+            with open(oath_path, 'r') as f:
+                services = list(_csv.DictReader(f))
+
+        # Check all services in parallel using a shared session (connection pooling)
+        session = _requests.Session()
+        with ThreadPoolExecutor(max_workers=len(services) or 1) as pool:
+            results = list(pool.map(
+                lambda svc: _check_one_service(svc, session, is_self=(svc.get('service_name') == 'sso.pdhc')),
+                services,
+            ))
+        session.close()
+
+        _health_cache['results'] = results
+        _health_cache['checked_at'] = now
+
+        interval = app.config.get('HEALTH_CHECK_INTERVAL', 300)
+        return jsonify({
+            'services': results,
+            'interval_seconds': interval,
+            'checked_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        })
 
     return app

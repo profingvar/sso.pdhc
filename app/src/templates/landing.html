@@ -1,20 +1,51 @@
 {% extends "base.html" %}
 {% block title %}sso.pdhc — SSO Service{% endblock %}
+{% block extra_head %}
+<style>
+.service-row td { vertical-align: middle; }
+.dot {
+    display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: #adb5bd; transition: background 0.3s, box-shadow 0.3s;
+    margin-right: 2px; cursor: default;
+}
+.dot.up   { background: #16a34a; box-shadow: 0 0 5px rgba(22,163,74,0.5); }
+.dot.down { background: #dc2626; box-shadow: 0 0 5px rgba(220,38,38,0.4); }
+.dot.chk  { background: #adb5bd; animation: blink 1s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.section-divider {
+    border: none; border-top: 2px solid var(--border);
+    margin: 2rem 0 1.5rem;
+}
+.provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+.provider-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.provider-card h3 { margin-bottom: 0.25rem; }
+.provider-card .domain { font-family: monospace; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+.provider-card p { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.75rem; }
+@media (max-width: 768px) { .provider-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="text-center" style="margin-top:2rem;">
-    <h1 style="font-size:2rem; margin-bottom:0.5rem;">sso.pdhc</h1>
-    <p class="text-muted" style="font-size:1.1rem;">Central SSO/OAuth Service for PDHC</p>
+<div class="text-center" style="margin-top:2rem; margin-bottom:2rem;">
+    <h1 style="font-size:2rem; margin-bottom:0.4rem;">sso.pdhc</h1>
+    <p class="text-muted" style="font-size:1.05rem;">Central SSO / OAuth 2.0 service for the PDHC platform</p>
 </div>
 
 <div class="grid-3 mt-2">
     <div class="card text-center">
         <h3>Login</h3>
-        <p class="text-muted">Existing users can log in to access the service.</p>
+        <p class="text-muted">Existing users log in to access the service.</p>
         <a href="/login" class="btn btn-primary mt-1">Login</a>
     </div>
     <div class="card text-center">
         <h3>Patient Registration</h3>
-        <p class="text-muted">Register as a patient to participate in the health data registry.</p>
+        <p class="text-muted">Register as a patient to join the health data registry.</p>
         <a href="/register-patient" class="btn btn-primary mt-1">Register</a>
     </div>
     <div class="card text-center">
@@ -24,28 +55,203 @@
     </div>
 </div>
 
-<!-- Registered Services -->
-<div class="card mt-2">
-    <h3>Registered Services</h3>
-    {% if services %}
-    <table>
-        <thead>
-            <tr><th>Service</th><th>URL</th><th>Health</th><th>Privilege</th><th>Notes</th></tr>
-        </thead>
-        <tbody>
-        {% for s in services %}
-            <tr>
-                <td>{{ s.get('service_name', '-') }}</td>
-                <td>{{ s.get('service_url', '-') }}</td>
-                <td>{{ s.get('api_health_url', '-') }}</td>
-                <td>{{ s.get('privilege_level', '-') }}</td>
-                <td>{{ s.get('notes', '-') }}</td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
+<!-- Core platform services -->
+<hr class="section-divider">
+<h2 style="margin-bottom:0.75rem;">Platform Services</h2>
+<p class="text-muted" style="margin-bottom:1rem; font-size:0.9rem;">
+    All core PDHC services registered with this SSO instance.
+    <span style="margin-left:0.5rem;">
+        <span class="dot up" title="Up"></span> up &nbsp;
+        <span class="dot down" title="Down"></span> down &nbsp;
+        <span class="dot chk" title="Checking"></span> checking
+    </span>
+</p>
+
+<div class="card" style="padding:0; overflow:hidden;">
+<table>
+    <thead>
+        <tr>
+            <th>Service</th>
+            <th>URL</th>
+            <th>API</th>
+            <th>Auth</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% set core_services = ['sso.pdhc','plan.pdhc','ips.pdhc','contract.pdhc','request.pdhc','gateway.pdhc'] %}
+    {% for s in services if s.get('service_name','') in core_services %}
+    <tr class="service-row" data-health="{{ s.get('api_health_url','') }}">
+        <td style="font-weight:600; white-space:nowrap;">
+            <span class="dot chk" title="Checking..."></span>
+            {{ s.get('service_name', '—') }}
+        </td>
+        <td><a href="{{ s.get('service_url','#') }}" target="_blank" style="font-family:monospace; font-size:0.85rem;">{{ s.get('service_url','—') }}</a></td>
+        <td><code style="font-size:0.8rem;">{{ s.get('api_health_url','—') }}</code></td>
+        <td><span class="badge badge-endorsed">{{ s.get('privilege_level','—') }}</span></td>
+        <td style="font-size:0.88rem; color:var(--text-muted);">{{ s.get('notes','—') }}</td>
+    </tr>
     {% else %}
-    <p class="text-muted">No downstream services registered yet.</p>
-    {% endif %}
+    <tr><td colspan="5" class="text-muted" style="padding:1rem;">No services registered yet.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
 </div>
+
+<!-- Provider and 1177 sections -->
+<hr class="section-divider">
+<h2 style="margin-bottom:0.75rem;">Connected Services</h2>
+<p class="text-muted" style="margin-bottom:1.25rem; font-size:0.9rem;">
+    Provider and patient-facing endpoints — authenticated via Provider Access Token or API Key, not SSO session.
+</p>
+
+<div class="provider-grid">
+
+    <!-- Provider -->
+    <div class="provider-card" data-health="https://provider1.pdhc.se/api/v1/health">
+        <h3>
+            <span class="dot chk" title="Checking..."></span>
+            Provider
+        </h3>
+        <div class="domain">provider1.pdhc.se &middot; ports 9070&ndash;9075</div>
+        <p>
+            Care provider portal. Authenticates via <code>X-Provider-Token</code> issued by request.pdhc.
+            Receives dispatched ServiceRequests, acknowledges delivery, and submits structured
+            FHIR Observation reports back to gateway.pdhc.
+        </p>
+        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+            <a href="https://provider1.pdhc.se" target="_blank" class="btn btn-primary btn-sm">Open Provider</a>
+            <span class="badge badge-endorsed">provider-token</span>
+        </div>
+    </div>
+
+    <!-- CGM -->
+    <div class="provider-card" data-health="https://cgm.pdhc.pdhc.se/api/v1/health">
+        <h3>
+            <span class="dot chk" title="Checking..."></span>
+            CGM
+        </h3>
+        <div class="domain">cgm.pdhc.pdhc.se &middot; ports 9080&ndash;9081</div>
+        <p>
+            Continuous glucose monitoring provider. Receives procedure-based ServiceRequests,
+            auto-starts a background glucose stream on acknowledgement, and delivers continuous
+            observation batches to gateway.pdhc until manually stopped.
+        </p>
+        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+            <a href="https://cgm.pdhc.pdhc.se" target="_blank" class="btn btn-primary btn-sm">Open CGM</a>
+            <span class="badge badge-endorsed">api-key</span>
+        </div>
+    </div>
+
+    <!-- 1177 -->
+    <div class="provider-card" data-health="https://1177.pdhc.se/api/health">
+        <h3>
+            <span class="dot chk" title="Checking..."></span>
+            1177 Patient Forms
+        </h3>
+        <div class="domain">1177.pdhc.se &middot; ports 9036&ndash;9039</div>
+        <p>
+            Patient questionnaire assignment service. Receives FHIR ServiceRequests from request.pdhc
+            via signed webhook, creates one assignment per Questionnaire, and dispatches completed
+            FHIR QuestionnaireResponses back to gateway.pdhc.
+        </p>
+        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+            <a href="https://1177.pdhc.se" target="_blank" class="btn btn-primary btn-sm">Open 1177</a>
+            <span class="badge badge-endorsed">api-key</span>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+    var TIMEOUT = 7000;
+    function setDot(dot, cls, title) {
+        dot.className = 'dot ' + cls;
+        dot.title = title;
+    }
+    // Probe strategy:
+    //   1. Try mode:'cors' and parse JSON. Drives the dot from the
+    //      service's reported `status` / `database` fields. This gives
+    //      an honest signal (HTTP 503 with db=unavailable shows red
+    //      even though the TCP connection succeeded).
+    //   2. If the CORS fetch rejects (no Access-Control-Allow-Origin
+    //      on the target, or non-2xx with no CORS headers), fall back
+    //      to a mode:'no-cors' reachability probe. This keeps services
+    //      that haven't been polished yet showing green-on-reachable
+    //      rather than a misleading red.
+    async function probe(url, dot) {
+        if (!url || url === '—') { setDot(dot, 'down', 'No health URL'); return; }
+        // Step 1: CORS + JSON
+        var ctrl1 = new AbortController();
+        var t1 = setTimeout(function(){ ctrl1.abort(); }, TIMEOUT);
+        try {
+            var res = await fetch(url, { mode: 'cors', signal: ctrl1.signal });
+            clearTimeout(t1);
+            var body = null;
+            try { body = await res.json(); } catch (_) { /* not JSON */ }
+            if (body && typeof body === 'object') {
+                // Match the admin backend's logic (app.py::_check_one_service):
+                //   database === 'connected'   → green, with DB reported
+                //   database === 'unavailable' → red, DB down
+                //   no `database` field        → fall back to `status === 'ok'`
+                // Services that don't report a database field (plan.pdhc,
+                // contract.pdhc today) still show green if status says so.
+                var statusOk = body.status === 'ok';
+                var dbReported = body.database === 'connected' || body.database === 'unavailable';
+                var dbOk = body.database === 'connected' ||
+                           (!dbReported && statusOk);
+                var healthy = res.ok && statusOk && dbOk;
+                if (healthy) {
+                    var tip = dbReported ? 'API ok · DB connected'
+                                         : 'API ok · DB not reported';
+                    setDot(dot, 'up', tip);
+                } else {
+                    var reason = !res.ok ? ('HTTP ' + res.status) :
+                                 !statusOk ? ('status ' + (body.status || 'unknown')) :
+                                 ('DB ' + (body.database || 'unknown'));
+                    setDot(dot, 'down', 'Degraded: ' + reason);
+                }
+                return;
+            }
+            // CORS succeeded but body isn't parseable — still a reachable signal
+            setDot(dot, res.ok ? 'up' : 'down',
+                   res.ok ? 'Reachable (opaque body)' : ('HTTP ' + res.status));
+            return;
+        } catch (e) {
+            clearTimeout(t1);
+            // fall through to no-cors probe
+        }
+        // Step 2: no-cors fallback (reachability only)
+        var ctrl2 = new AbortController();
+        var t2 = setTimeout(function(){ ctrl2.abort(); }, TIMEOUT);
+        try {
+            await fetch(url, { mode: 'no-cors', signal: ctrl2.signal });
+            clearTimeout(t2);
+            setDot(dot, 'up', 'Reachable (CORS not enabled — DB state unknown)');
+        } catch(e) {
+            setDot(dot, 'down', 'Unreachable');
+        }
+    }
+    function init() {
+        // Table rows
+        document.querySelectorAll('tr[data-health]').forEach(function(row) {
+            var dot = row.querySelector('.dot');
+            if (dot) probe(row.dataset.health, dot);
+        });
+        // Provider cards
+        document.querySelectorAll('.provider-card[data-health]').forEach(function(card) {
+            var dot = card.querySelector('.dot');
+            if (dot) probe(card.dataset.health, dot);
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
+</script>
 {% endblock %}

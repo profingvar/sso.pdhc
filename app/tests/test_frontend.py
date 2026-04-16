@@ -436,6 +436,17 @@ class TestDocsPage:
         resp = client.get('/docs/download/../../etc/passwd')
         assert resp.status_code == 404
 
+    def test_nonexistent_route_returns_404(self, client, app):
+        """Ticket #58: the global exception handler must not coerce 404 → 500."""
+        resp = client.get('/this-route-definitely-does-not-exist')
+        assert resp.status_code == 404
+
+    def test_wrong_method_returns_405(self, client, app):
+        """Ticket #58: the global exception handler must not coerce 405 → 500."""
+        # /api/auth/login accepts POST; GET must yield 405, not 500.
+        resp = client.get('/api/auth/login')
+        assert resp.status_code == 405
+
 
 # ============================================================
 # 9.h — Landing page
@@ -449,7 +460,11 @@ class TestLandingPage:
         assert resp.status_code == 200
         html = resp.data.decode()
         assert 'sso.pdhc' in html
-        assert 'Registered Services' in html
+        # The landing page groups services into two sections after the
+        # 2026-04 rewrite (ticket #59): SSO-authenticated core services
+        # and non-SSO-authenticated provider/patient endpoints.
+        assert 'Platform Services' in html
+        assert 'Connected Services' in html
 
 
 # ============================================================
