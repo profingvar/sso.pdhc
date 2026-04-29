@@ -22,8 +22,9 @@ with the same scheme as user passwords, and shown to the SU exactly once
 """
 import secrets
 from datetime import datetime, timezone
+from functools import wraps
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, session, current_app
 
 from src.db import get_db
 from src.middleware.auth_middleware import (
@@ -32,9 +33,68 @@ from src.middleware.auth_middleware import (
 from src.models.external_partner import ExternalPartner, ExternalPartnerAudit
 from src.services.auth_service import hash_password, verify_password
 from src.services.audit_log import audit
+from src.services.jwt_service import (
+    validate_token, TokenExpiredError, TokenInvalidError, TokenRevokedError,
+)
 
 
 partners_bp = Blueprint('partners', __name__)
+
+
+# ---------------------------------------------------------------------------
+# Auth — accept either Bearer token (operator scripting) OR session cookie
+# (the in-page SU admin UI). Mirrors the pattern in routes/frontend.py
+# (_require_su_json) so the same browser session that loads /su/admin can
+# call these endpoints without an extra token-mint step.
+# ---------------------------------------------------------------------------
+
+def _resolve_su_user():
+    """Return a User if the request carries a valid SU credential
+    (bearer OR session cookie), else None."""
+    from src.models.user import User
+    db = get_db()
+    secret = current_app.config.get('SECRET_KEY', '')
+
+    # 1) Bearer token in Authorization header (scripts, monitor / cron)
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+        try:
+            payload = validate_token(token, secret, db)
+            user = db.query(User).filter_by(guid=payload['sub']).first()
+            if user is not None:
+                return user
+        except (TokenExpiredError, TokenInvalidError, TokenRevokedError):
+            pass
+
+    # 2) JWT stored in Flask session by the cookie-based login flow
+    sess_token = session.get('token')
+    if sess_token:
+        try:
+            payload = validate_token(sess_token, secret, db)
+            user = db.query(User).filter_by(guid=payload['sub']).first()
+            if user is not None:
+                return user
+        except (TokenExpiredError, TokenInvalidError, TokenRevokedError):
+            session.pop('token', None)
+
+    return None
+
+
+def _require_su(f):
+    """Gate: must be authenticated AND is_su_admin. JSON 401/403."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = _resolve_su_user()
+        if user is None:
+            return jsonify(error='authentication_required',
+                           message='Valid Bearer token or SU session required'), 401
+        if not user.is_su_admin:
+            return jsonify(error='forbidden',
+                           message='SU admin access required'), 403
+        g.current_user = user
+        return f(*args, **kwargs)
+    return decorated
 
 
 # ---------------------------------------------------------------------------
@@ -232,8 +292,7 @@ def validate_partner(guid: str):
 # ---------------------------------------------------------------------------
 
 @partners_bp.route('/api/admin/partners', methods=['GET'])
-@require_auth
-@require_su
+@_require_su
 def admin_list_partners():
     session = get_db()
     rows = session.query(ExternalPartner).order_by(ExternalPartner.created_at.desc()).all()
@@ -241,8 +300,7 @@ def admin_list_partners():
 
 
 @partners_bp.route('/api/admin/partners', methods=['POST'])
-@require_auth
-@require_su
+@_require_su
 def admin_create_partner():
     """Register a new partner. Generates the credential server-side and
     returns the cleartext exactly once — the SU must copy it now or rotate."""
@@ -297,8 +355,7 @@ def admin_create_partner():
 
 
 @partners_bp.route('/api/admin/partners/<guid>', methods=['GET'])
-@require_auth
-@require_su
+@_require_su
 def admin_get_partner(guid: str):
     session = get_db()
     p = session.query(ExternalPartner).filter_by(guid=guid).first()
@@ -308,8 +365,7 @@ def admin_get_partner(guid: str):
 
 
 @partners_bp.route('/api/admin/partners/<guid>', methods=['PATCH'])
-@require_auth
-@require_su
+@_require_su
 def admin_edit_partner(guid: str):
     """Edit mutable fields. Cannot change country_code, org_number,
     auth_kind — those changes require revoke + re-register (plan §5.3)."""
@@ -343,8 +399,7 @@ def admin_edit_partner(guid: str):
 
 
 @partners_bp.route('/api/admin/partners/<guid>/rotate', methods=['POST'])
-@require_auth
-@require_su
+@_require_su
 def admin_rotate_credential(guid: str):
     """Rotate the partner's credential. Old secret stops working immediately.
     New secret returned once."""
@@ -379,8 +434,7 @@ def admin_rotate_credential(guid: str):
 
 
 @partners_bp.route('/api/admin/partners/<guid>/suspend', methods=['POST'])
-@require_auth
-@require_su
+@_require_su
 def admin_suspend(guid: str):
     session = get_db()
     p = session.query(ExternalPartner).filter_by(guid=guid).first()
@@ -399,8 +453,7 @@ def admin_suspend(guid: str):
 
 
 @partners_bp.route('/api/admin/partners/<guid>/reactivate', methods=['POST'])
-@require_auth
-@require_su
+@_require_su
 def admin_reactivate(guid: str):
     session = get_db()
     p = session.query(ExternalPartner).filter_by(guid=guid).first()
@@ -419,8 +472,7 @@ def admin_reactivate(guid: str):
 
 
 @partners_bp.route('/api/admin/partners/<guid>/revoke', methods=['POST'])
-@require_auth
-@require_su
+@_require_su
 def admin_revoke(guid: str):
     """Irreversible at the SSO layer — registering again requires a new GUID."""
     body = request.get_json(silent=True) or {}
@@ -444,8 +496,7 @@ def admin_revoke(guid: str):
 
 
 @partners_bp.route('/api/admin/partners/<guid>/audit', methods=['GET'])
-@require_auth
-@require_su
+@_require_su
 def admin_partner_audit(guid: str):
     session = get_db()
     p = session.query(ExternalPartner).filter_by(guid=guid).first()
@@ -462,8 +513,7 @@ def admin_partner_audit(guid: str):
 
 
 @partners_bp.route('/api/admin/partners/_meta/catalogue', methods=['GET'])
-@require_auth
-@require_su
+@_require_su
 def admin_catalogue():
     """Return the closed-set scope + service catalogues for the admin UI."""
     return jsonify({
