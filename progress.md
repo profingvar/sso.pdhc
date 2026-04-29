@@ -260,3 +260,50 @@ Hardening changes applied to `app/src/app.py`. All 226 tests still passing.
 | R23 | OK | .env fully prepared, create_su.py bootstraps SU from .env |
 
 All required files present. 226/226 tests passing. Documentation built. All phases complete.
+
+## 2026-04-29 — External Partners feature (plans/external_partners_plan.md)
+
+Workflow for registering external organisations as authenticated callers
+of PDHC, with stable per-partner GUIDs that contract.pdhc references in
+FHIR Contract.signer.party.reference. Replaces the broken KEYAUTH_SERVICE_*
+service-key UI (which always rendered "No keyed services configured"
+because nothing in prod set those env pairs).
+
+**What landed locally** (not yet deployed):
+
+- New ORM models: `ExternalPartner` + `ExternalPartnerAudit` (plan §3).
+- New blueprint at `src/routes/partners.py` with 11 endpoints (public
+  lookup, internal validate, SU CRUD + rotate / suspend / reactivate /
+  revoke / audit / catalogue).
+- Admin UI integrated into `su_admin.html` (server-rendered + small JS):
+  register form with checkbox-driven scope and service selection from a
+  closed catalogue; partners table with status badges and per-row
+  lifecycle actions; secret shown exactly once at create / rotate.
+- 22 new tests in `tests/test_partners.py`. Full suite green (253 / 253).
+
+**Test results — `pytest`:**
+
+- `tests/test_partners.py` — 22 / 22 passed.
+- `tests/test_models.py::TestAllTablesCreated` — updated EXPECTED_TABLES;
+  passes.
+- Whole repo suite — 253 / 253 passed in ~114 s.
+
+**Open / next steps (per plan §8 rollout):**
+
+1. **Deploy** — pack via `pack_deploy.sh`, operator transfers + extracts
+   on miserver:/usr/local/www/sso.pdhc/, runs `python scripts/init_db.py`
+   to materialise the two new tables, then `safe_restart.sh`. The
+   migration is idempotent (Base.metadata.create_all) and additive — no
+   data loss possible.
+2. **Step 4** of the plan (extending each PDHC service's request loader
+   to recognise `partner:<guid>` sources) is **not** yet done — needs a
+   per-service code change in 13 services, gated on the operator
+   approving partner #1 in production first. Out of scope for this
+   commit.
+3. **Step 5** (contract.pdhc reference validation + inline display) —
+   not yet done. Self-contained next change in contract.pdhc; also
+   gated on at least one production partner existing.
+4. **Step 6** (delete the legacy `KEYAUTH_SERVICE_*` config block in
+   `src/config.py` + the unused frontend routes that fed the old UI) —
+   deferred. Operator should grep prod env on miserver for any
+   `KEYAUTH_SERVICE_*=` first; if nothing, safe to remove.

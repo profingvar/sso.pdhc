@@ -11,9 +11,12 @@ from src.models.leader_request import LeaderRequest
 from src.models.access_request import AccessRequest
 from src.models.invite import Invite
 from src.models.revoked_token import RevokedToken
+from src.models.user_phase import UserPhase
+from src.models.external_partner import ExternalPartner, ExternalPartnerAudit
 
 __all__ = [
     'User', 'Patient', 'Professional', 'Organisation', 'UserOrganisation',
     'Group', 'Membership', 'GroupProposal', 'LeaderRequest',
-    'AccessRequest', 'Invite', 'RevokedToken',
+    'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',
+    'ExternalPartner', 'ExternalPartnerAudit',
 ]

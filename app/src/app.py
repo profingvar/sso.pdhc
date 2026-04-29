@@ -119,9 +119,12 @@ def create_app(config_override=None):
     from src.routes.internal import internal_bp
     app.register_blueprint(internal_bp)
 
+    from src.routes.partners import partners_bp
+    app.register_blueprint(partners_bp)
+
     # Exempt API blueprints from CSRF — they use Bearer tokens, not cookies
     from src.middleware.csrf import csrf
-    for bp in [auth_bp, patient_bp, groups_bp, admin_bp, public_bp, fhir_bp, internal_bp]:
+    for bp in [auth_bp, patient_bp, groups_bp, admin_bp, public_bp, fhir_bp, internal_bp, partners_bp]:
         csrf.exempt(bp)
 
     # --- Error handlers: catch exceptions and log them ---
@@ -175,11 +178,21 @@ def create_app(config_override=None):
         status = 'ok' if db_ok or app.config.get('TESTING') else 'degraded'
         code = 200 if status == 'ok' else 503
 
-        return jsonify({
+        resp = jsonify({
             "status": status,
+            "service": "sso.pdhc",
             "database": "connected" if db_ok else "unavailable",
             "uptime_seconds": uptime,
-        }), code
+        })
+        # Ticket #70 / CLAUDE.md §10: let www.pdhc.se/services.html read the
+        # JSON body cross-origin so it can drive real status/DB dots. Specific
+        # origin + Vary: Origin (not "*") keeps future Allow-Credentials
+        # spec-compliant.
+        resp.headers['Access-Control-Allow-Origin'] = 'https://www.pdhc.se'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET'
+        resp.headers['Vary'] = 'Origin'
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp, code
 
     # --- Service health aggregator (checks all registered services) ---
     _health_cache = {'results': None, 'checked_at': 0}

@@ -35,6 +35,7 @@ class TestAllTablesCreated:
         'user_organisations', 'groups', 'memberships', 'group_proposals',
         'leader_requests', 'access_requests', 'invites', 'revoked_tokens',
         'user_phases',  # #46: direct phase grants
+        'external_partner', 'external_partner_audit',  # external partners feature
     ]
 
     def test_all_tables_exist(self, db_session):

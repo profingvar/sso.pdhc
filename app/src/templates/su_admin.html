@@ -419,6 +419,221 @@
     <p class="text-muted">No services registered.</p>
     {% endif %}
 </div>
+
+<!-- External Partners (replaces the legacy KEYAUTH_SERVICE_* registry) -->
+<div class="card">
+    <h3 style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        External Partners
+        <span style="font-size:0.7rem;font-weight:400;color:var(--text-muted,#6b7280);">third-party callers licensed to talk to PDHC</span>
+        <button onclick="window._partnersRefresh()" style="margin-left:auto;font-size:0.75rem;padding:3px 10px;border-radius:4px;border:1px solid var(--border,#d1d5db);background:var(--bg,#fff);color:var(--text,#374151);cursor:pointer;">Reload</button>
+        <button onclick="window._partnersToggleNew()" style="font-size:0.75rem;padding:3px 10px;border-radius:4px;border:none;background:#2563eb;color:#fff;cursor:pointer;">+ Register partner</button>
+    </h3>
+
+    <!-- Block A: Register form (collapsed by default) -->
+    <div id="partners-new" style="display:none;margin-bottom:1rem;padding:0.75rem;border:1px solid var(--border,#d1d5db);border-radius:6px;background:#f9fafb;">
+        <h4 style="margin:0 0 0.5rem 0;font-size:0.9rem;">Register a new partner</h4>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0.5rem;font-size:0.85rem;">
+            <label>Display name<input id="pn-display-name" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border,#d1d5db);"></label>
+            <label>Country (ISO-2)<input id="pn-country" maxlength="2" placeholder="SE" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border,#d1d5db);text-transform:uppercase;"></label>
+            <label>Org number<input id="pn-org-number" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border,#d1d5db);"></label>
+            <label>Contact email<input id="pn-contact-email" type="email" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border,#d1d5db);"></label>
+            <label>Contact name<input id="pn-contact-name" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border,#d1d5db);"></label>
+            <label>Contact phone<input id="pn-contact-phone" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border,#d1d5db);"></label>
+            <label>Auth kind
+                <select id="pn-auth-kind" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border,#d1d5db);">
+                    <option value="api_key">api_key</option>
+                    <option value="oauth_client">oauth_client</option>
+                    <option value="none">none</option>
+                </select>
+            </label>
+            <label>Expires (optional)<input id="pn-expires" type="date" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border,#d1d5db);"></label>
+        </div>
+        <div style="margin-top:0.5rem;font-size:0.85rem;">
+            <label style="display:block;margin-bottom:0.25rem;">Description</label>
+            <textarea id="pn-description" rows="2" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border,#d1d5db);"></textarea>
+        </div>
+        <div style="margin-top:0.5rem;font-size:0.85rem;">
+            <label style="display:block;margin-bottom:0.25rem;">Allowed services <span style="color:var(--text-muted,#6b7280);">(check at least one)</span></label>
+            <div id="pn-services" style="display:flex;flex-wrap:wrap;gap:0.5rem;"></div>
+        </div>
+        <div style="margin-top:0.5rem;font-size:0.85rem;">
+            <label style="display:block;margin-bottom:0.25rem;">Allowed scopes</label>
+            <div id="pn-scopes" style="display:flex;flex-wrap:wrap;gap:0.5rem;"></div>
+        </div>
+        <div style="margin-top:0.75rem;display:flex;gap:0.5rem;">
+            <button onclick="window._partnersSubmit()" style="padding:5px 14px;border-radius:4px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Register</button>
+            <button onclick="window._partnersToggleNew()" style="padding:5px 14px;border-radius:4px;border:1px solid var(--border,#d1d5db);background:#fff;cursor:pointer;">Cancel</button>
+        </div>
+        <div id="pn-secret-result" style="display:none;margin-top:0.75rem;padding:0.6rem;background:#fef3c7;border:1px solid #f59e0b;border-radius:4px;">
+            <strong>Partner registered. Copy the secret now &mdash; it will not be shown again:</strong><br>
+            <code id="pn-secret" style="word-break:break-all;font-size:0.9rem;user-select:all;"></code>
+            <p style="margin:0.4rem 0 0 0;font-size:0.8rem;color:#78350f;">Deliver to the partner via a secure channel. Use Rotate to mint a fresh secret if needed.</p>
+        </div>
+        <p id="pn-error" style="display:none;color:#dc2626;font-size:0.85rem;margin-top:0.5rem;"></p>
+    </div>
+
+    <!-- Block B: Existing partners table -->
+    <div style="overflow-x:auto;">
+        <table id="partners-table" style="font-size:0.85rem;">
+            <thead>
+                <tr>
+                    <th>Partner</th>
+                    <th>Country</th>
+                    <th>Contact</th>
+                    <th>Auth</th>
+                    <th>Status</th>
+                    <th>Expires</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="partners-tbody">
+                <tr><td colspan="7" style="text-align:center;color:var(--text-muted,#6b7280);padding:0.75rem;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function() {
+    const SU_TOKEN_KEY = 'sso_su_token';
+
+    function authHeaders() {
+        const token = window.SSO_TOKEN || (typeof getCookie === 'function' && getCookie('sso_token'));
+        return token ? {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
+                     : {'Content-Type': 'application/json'};
+    }
+
+    let CATALOGUE = {scopes: [], services: []};
+
+    async function loadCatalogue() {
+        try {
+            const r = await fetch('/api/admin/partners/_meta/catalogue', {headers: authHeaders()});
+            if (r.ok) CATALOGUE = await r.json();
+        } catch (e) { /* ignore — form just shows empty checkbox sets */ }
+
+        const sBox = document.getElementById('pn-services');
+        const cBox = document.getElementById('pn-scopes');
+        if (sBox) sBox.innerHTML = CATALOGUE.services.map(s =>
+            `<label style="font-size:0.8rem;"><input type="checkbox" value="${s}"> ${s}</label>`).join('');
+        if (cBox) cBox.innerHTML = CATALOGUE.scopes.map(s =>
+            `<label style="font-size:0.8rem;"><input type="checkbox" value="${s}"> ${s}</label>`).join('');
+    }
+
+    function statusBadge(status) {
+        const colors = {active: '#16a34a', suspended: '#d97706', revoked: '#dc2626'};
+        return `<span style="display:inline-block;padding:1px 7px;border-radius:9999px;font-size:0.7rem;background:${colors[status] || '#6b7280'};color:#fff;">${status}</span>`;
+    }
+
+    async function refresh() {
+        const tbody = document.getElementById('partners-tbody');
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted,#6b7280);padding:0.75rem;">Loading...</td></tr>';
+        try {
+            const r = await fetch('/api/admin/partners', {headers: authHeaders()});
+            if (!r.ok) throw new Error('list failed: ' + r.status);
+            const data = await r.json();
+            if (!data.partners.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted,#6b7280);padding:0.75rem;">No external partners registered yet. Click "+ Register partner" above.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.partners.map(p => `
+                <tr>
+                    <td><strong>${p.display_name}</strong><br><code style="font-size:0.7rem;color:#6b7280;cursor:pointer;" onclick="navigator.clipboard.writeText('${p.partner_guid}');this.style.background='#dcfce7';setTimeout(()=>this.style.background='',600)">${p.partner_guid.slice(0,8)}…</code></td>
+                    <td>${p.country_code}</td>
+                    <td>${p.contact_email || ''}<br><span style="font-size:0.75rem;color:#6b7280;">${p.contact_name || ''}</span></td>
+                    <td>${p.auth_kind}</td>
+                    <td>${statusBadge(p.status)}</td>
+                    <td style="white-space:nowrap;">${p.expires_at ? p.expires_at.slice(0,10) : '—'}</td>
+                    <td style="text-align:right;white-space:nowrap;">
+                        <button onclick="window._partnersRotate('${p.partner_guid}')" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;border:1px solid var(--border,#d1d5db);background:#fff;cursor:pointer;">Rotate</button>
+                        ${p.status === 'active' ? `<button onclick="window._partnersSuspend('${p.partner_guid}')" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;border:1px solid #d97706;background:#fff;color:#d97706;cursor:pointer;">Suspend</button>` :
+                          p.status === 'suspended' ? `<button onclick="window._partnersReactivate('${p.partner_guid}')" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;border:1px solid #16a34a;background:#fff;color:#16a34a;cursor:pointer;">Reactivate</button>` : ''}
+                        ${p.status !== 'revoked' ? `<button onclick="window._partnersRevoke('${p.partner_guid}')" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;border:1px solid #dc2626;background:#fff;color:#dc2626;cursor:pointer;">Revoke</button>` : ''}
+                    </td>
+                </tr>`).join('');
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="7" style="color:#dc2626;padding:0.75rem;">Error: ${e.message}</td></tr>`;
+        }
+    }
+
+    function checkedValues(id) {
+        return Array.from(document.querySelectorAll(`#${id} input[type=checkbox]:checked`)).map(b => b.value);
+    }
+
+    window._partnersToggleNew = function() {
+        const box = document.getElementById('partners-new');
+        box.style.display = box.style.display === 'none' ? 'block' : 'none';
+        document.getElementById('pn-secret-result').style.display = 'none';
+        document.getElementById('pn-error').style.display = 'none';
+    };
+
+    window._partnersRefresh = refresh;
+
+    window._partnersSubmit = async function() {
+        const err = document.getElementById('pn-error');
+        err.style.display = 'none';
+        const body = {
+            display_name: document.getElementById('pn-display-name').value.trim(),
+            country_code: document.getElementById('pn-country').value.trim().toUpperCase(),
+            org_number: document.getElementById('pn-org-number').value.trim() || null,
+            contact_email: document.getElementById('pn-contact-email').value.trim(),
+            contact_name: document.getElementById('pn-contact-name').value.trim() || null,
+            contact_phone: document.getElementById('pn-contact-phone').value.trim() || null,
+            description: document.getElementById('pn-description').value.trim() || null,
+            auth_kind: document.getElementById('pn-auth-kind').value,
+            allowed_services: checkedValues('pn-services'),
+            allowed_scopes: checkedValues('pn-scopes'),
+            expires_at: document.getElementById('pn-expires').value
+                ? document.getElementById('pn-expires').value + 'T00:00:00Z' : null,
+        };
+        try {
+            const r = await fetch('/api/admin/partners', {
+                method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
+            });
+            const data = await r.json();
+            if (!r.ok) { err.textContent = data.message || data.error || 'failed'; err.style.display = 'block'; return; }
+            if (data.secret_cleartext) {
+                document.getElementById('pn-secret').textContent = data.secret_cleartext;
+                document.getElementById('pn-secret-result').style.display = 'block';
+            }
+            refresh();
+        } catch (e) { err.textContent = e.message; err.style.display = 'block'; }
+    };
+
+    window._partnersRotate = async function(guid) {
+        if (!confirm('Rotate the credential? The current secret stops working immediately.')) return;
+        const r = await fetch(`/api/admin/partners/${guid}/rotate`, {method: 'POST', headers: authHeaders()});
+        const data = await r.json();
+        if (!r.ok) { alert('Rotate failed: ' + (data.message || data.error)); return; }
+        if (data.secret_cleartext) {
+            prompt('New secret (copy now — will not be shown again):', data.secret_cleartext);
+        }
+        refresh();
+    };
+
+    window._partnersSuspend = async function(guid) {
+        if (!confirm('Suspend this partner? They cannot call any service until reactivated.')) return;
+        await fetch(`/api/admin/partners/${guid}/suspend`, {method: 'POST', headers: authHeaders()});
+        refresh();
+    };
+
+    window._partnersReactivate = async function(guid) {
+        await fetch(`/api/admin/partners/${guid}/reactivate`, {method: 'POST', headers: authHeaders()});
+        refresh();
+    };
+
+    window._partnersRevoke = async function(guid) {
+        const reason = prompt('Reason for revocation (will be recorded in audit log):');
+        if (reason === null) return;
+        const r = await fetch(`/api/admin/partners/${guid}/revoke`, {
+            method: 'POST', headers: authHeaders(), body: JSON.stringify({reason}),
+        });
+        if (!r.ok) { const d = await r.json(); alert('Revoke failed: ' + (d.message || d.error)); }
+        refresh();
+    };
+
+    document.addEventListener('DOMContentLoaded', () => { loadCatalogue(); refresh(); });
+})();
+</script>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -500,6 +715,97 @@
     // Initial check + start cycle
     fetchHealth();
     scheduleNext();
+})();
+
+/* --- Service Key Management --- */
+(function () {
+    var svcSelect = document.getElementById('km-service');
+    var tbody = document.getElementById('km-users-body');
+    var usersDiv = document.getElementById('km-users');
+    var genDiv = document.getElementById('km-generate');
+    var errP = document.getElementById('km-error');
+    var emptyP = document.getElementById('km-empty');
+
+    function showErr(msg) { errP.textContent = msg; errP.style.display = 'block'; }
+    function hideErr() { errP.style.display = 'none'; }
+
+    // Load available keyed services into dropdown
+    fetch('/api/admin/service-keys')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var svcs = data.services || [];
+            if (!svcs.length) { emptyP.style.display = 'block'; return; }
+            svcs.forEach(function(name) {
+                var opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                svcSelect.appendChild(opt);
+            });
+            genDiv.style.display = 'block';
+        })
+        .catch(function() { showErr('Failed to load keyed services list.'); });
+
+    window._kmLoadUsers = function() {
+        hideErr();
+        var svc = svcSelect.value;
+        if (!svc) { showErr('Select a service first.'); return; }
+        tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+        usersDiv.style.display = 'block';
+
+        fetch('/api/admin/service-keys/' + svc + '/users')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) { tbody.innerHTML = ''; showErr(data.message || data.error); return; }
+                var users = data.users || [];
+                if (!users.length) { tbody.innerHTML = '<tr><td colspan="5">No users on this service.</td></tr>'; return; }
+                tbody.innerHTML = '';
+                users.forEach(function(u) {
+                    var keyInfo = (u.keys || []).map(function(k) {
+                        var s = (k.label || k.guid.substring(0,8)) + ' (' + k.scopes + ')';
+                        if (k.revoked) s += ' [revoked]';
+                        return s;
+                    }).join(', ') || 'none';
+                    var tr = document.createElement('tr');
+                    tr.innerHTML =
+                        '<td>' + u.username + '</td>' +
+                        '<td>' + u.role + '</td>' +
+                        '<td>' + (u.is_active ? 'Yes' : 'No') + '</td>' +
+                        '<td style="font-size:0.8rem;">' + keyInfo + '</td>' +
+                        '<td><button onclick="document.getElementById(\'km-username\').value=\'' + u.username + '\'" ' +
+                        'style="font-size:0.75rem;padding:2px 8px;border-radius:3px;border:1px solid var(--border,#d1d5db);background:var(--bg,#fff);cursor:pointer;">New key</button></td>';
+                    tbody.appendChild(tr);
+                });
+            })
+            .catch(function() { tbody.innerHTML = ''; showErr('Failed to load users.'); });
+    };
+
+    window._kmGenerate = function() {
+        hideErr();
+        var svc = svcSelect.value;
+        var username = document.getElementById('km-username').value.trim();
+        var label = document.getElementById('km-label').value.trim();
+        var scopes = document.getElementById('km-scopes').value;
+        if (!svc) { showErr('Select a service first.'); return; }
+        if (!username) { showErr('Username is required.'); return; }
+
+        var body = {username: username, scopes: scopes};
+        if (label) body.label = label;
+
+        fetch('/api/admin/service-keys/' + svc + '/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error || data.code) { showErr(data.message || data.error || 'Key generation failed.'); return; }
+            document.getElementById('km-raw-key').textContent = data.raw_key;
+            document.getElementById('km-result').style.display = 'block';
+            // Refresh user list
+            window._kmLoadUsers();
+        })
+        .catch(function() { showErr('Request failed.'); });
+    };
 })();
 </script>
 {% endblock %}
