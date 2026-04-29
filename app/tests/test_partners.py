@@ -64,11 +64,11 @@ def test_create_persists_only_hash_not_cleartext(client, seeded_app, app):
     guid = r.get_json()['partner_guid']
     cleartext = r.get_json()['secret_cleartext']
 
-    from src.models.external_partner import ExternalPartner
+    from src.models.organisation import Organisation
     from src.db import get_session
     with app.app_context():
         s = get_session()
-        p = s.query(ExternalPartner).filter_by(guid=guid).first()
+        p = s.query(Organisation).filter_by(guid=guid, is_external=True).first()
         assert p.api_key_hash
         assert cleartext not in p.api_key_hash  # actually hashed
         s.close()

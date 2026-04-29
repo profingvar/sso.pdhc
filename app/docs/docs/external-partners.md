@@ -86,7 +86,7 @@ The cleartext secret is what's secret. The GUID is just the partner's name.
     {
       "type": { "code": "AGNT" },
       "party": {
-        "reference": "https://sso.pdhc.se/Partner/<partner_guid>",
+        "reference": "Organisation/<partner_guid>",
         "display": "Region Stockholm Diabetes Registry"
       }
     }

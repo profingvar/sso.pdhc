@@ -2,7 +2,7 @@
 from src.models.user import User
 from src.models.patient import Patient
 from src.models.professional import Professional
-from src.models.organisation import Organisation
+from src.models.organisation import Organisation, OrganisationAudit
 from src.models.user_organisation import UserOrganisation
 from src.models.group import Group
 from src.models.membership import Membership
@@ -12,11 +12,9 @@ from src.models.access_request import AccessRequest
 from src.models.invite import Invite
 from src.models.revoked_token import RevokedToken
 from src.models.user_phase import UserPhase
-from src.models.external_partner import ExternalPartner, ExternalPartnerAudit
 
 __all__ = [
-    'User', 'Patient', 'Professional', 'Organisation', 'UserOrganisation',
-    'Group', 'Membership', 'GroupProposal', 'LeaderRequest',
-    'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',
-    'ExternalPartner', 'ExternalPartnerAudit',
+    'User', 'Patient', 'Professional', 'Organisation', 'OrganisationAudit',
+    'UserOrganisation', 'Group', 'Membership', 'GroupProposal',
+    'LeaderRequest', 'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',
 ]
