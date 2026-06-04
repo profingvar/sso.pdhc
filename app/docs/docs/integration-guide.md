@@ -126,11 +126,20 @@ def authorize_professional_action(blob, required_phase=None, require_admin=False
     if blob['user_type'] != 'professional':
         return False, "Not a professional"
 
-    # SU admins bypass all checks
+    # #43: forced password reset — short-circuit before any other check.
+    # Callers should render/return a redirect to ${SSO_BASE_URL}/change-password
+    # when this hits.
+    if blob.get('must_change_password'):
+        return False, "Password change required"
+
+    # SU admins bypass all other checks.
     if blob.get('is_su_admin'):
         return True, "SU admin"
 
-    # Phase check
+    # Phase check — after #57 `effective_phases` is sourced only from
+    # direct UserPhase grants (#46). Groups are orthogonal category metadata
+    # and do NOT contribute. Your service is free to compose its own policy
+    # from `effective_phases` + `groups` + `organization_ids` independently.
     if required_phase and required_phase not in blob.get('effective_phases', []):
         return False, f"No access to phase: {required_phase}"
 
@@ -162,6 +171,55 @@ def map_action_to_phase(action):
     """Map a service action to its required SSO phase."""
     return ACTION_PHASE_MAP.get(action)
 ```
+
+## Operator Session Correlation (`session_id` + `X-Operator-Session-Id`)
+
+**Source: ticket #191 (SSO Phase 3 — session_id claim).**
+
+Every JWT issued at login carries a stable per-session UUID in the
+`sid` claim. The access blob projects this as `session_id`:
+
+```json
+{
+  "user_guid": "…",
+  "is_su_admin": false,
+  "session_id": "9e8c7d61-…-…-…",
+  …
+}
+```
+
+Properties:
+
+- Same value on every `/api/auth/me` and `/api/auth/me/service` call
+  validated against the same token.
+- Fresh value on each new login (new token).
+- `null` only for legacy tokens issued before #191 — services should
+  treat that as "no correlation available", not an error.
+
+**Convention for consumers.** When a service authenticated by the
+SSO blob makes an *onward* HTTPS call to another PDHC service that
+records read audits (e.g. `cdr_6`, `gateway`, `ips`), forward the
+session id as a header:
+
+```http
+GET /api/v1/Observation?patient=…
+Authorization: ApiKey …                # or Bearer if applicable
+X-Operator-Session-Id: 9e8c7d61-…-…    # <- blob['session_id']
+```
+
+The downstream service writes that value into its audit log row. A
+PDL Ch 4 §3 *kontroller* query can then ask "what did this operator
+session touch?" across services without joining on user_guid +
+narrow time window.
+
+**Do not:**
+
+- Cache the session id beyond the blob's normal lifetime (it changes
+  on relogin).
+- Forward the JWT itself as `X-Operator-Session-Id`. It's a separate,
+  smaller, non-secret identifier — safe to log; the JWT is not.
+- Treat absence of the header as an integrity violation. Legacy
+  callers may omit it; record `session_id=NULL` and proceed.
 
 ## Organisation as Single Source of Truth
 
@@ -198,10 +256,19 @@ Handle these SSO error scenarios in your service:
 | Scenario | SSO Response | Your Action |
 |----------|-------------|-------------|
 | Token expired | `401` from `/me/service` | Redirect to SSO login |
-| Token revoked | `401` from `/me/service` | Redirect to SSO login |
+| Token revoked (`jti`) | `401` from `/me/service` | Redirect to SSO login |
+| Session flushed (#44) | `401` from `/me/service` (token `iat` < `token_revocation_epoch`) | Clear local session, redirect to SSO login — same handling as expired/revoked |
+| Must change password (#43) | `200` with `must_change_password: true` | Block the protected action; HTML routes redirect to `${SSO_BASE_URL}/change-password`, API/FHIR routes return 403 with the URL in the response body |
 | Invalid service creds | `403` from `/me/service` | Log error, return 500 |
 | SSO unreachable | Connection error | Return 503, retry with backoff |
 | User lacks phase | `effective_phases` missing phase | Return 403 to user |
+
+### Troubleshooting
+
+- **User is stuck in a redirect loop to `/change-password`.** Confirm the service is not caching the blob across requests — caching makes `must_change_password` stick permanently. Call `/me/service` on every protected request (Rule 11).
+- **After an admin session flush, user still reaches protected pages.** Same root cause — blob caching. `/me/service` must be re-called per request so a fresh 401 can fire.
+- **SU granted a direct phase but the user still sees 403.** Confirm your service reads `blob['effective_phases']`, not `blob['groups']`. After #57 phase access lives only in `effective_phases`; group membership by itself never grants a phase.
+- **User was approved into a planning-typed group but has no `planning` access.** Expected under #57. Groups are organisational/category metadata — phase access is granted separately by SU via `POST /api/admin/users/<guid>/phases`.
 
 ## Adding a New Service: Checklist
 

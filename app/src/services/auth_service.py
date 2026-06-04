@@ -35,13 +35,20 @@ def authenticate_user(email, password, session):
     return user
 
 
-def build_access_blob(user, session):
+def build_access_blob(user, session, session_id=None):
     """Build the access blob for /api/auth/me response.
 
     Returns dict with:
-    - user_guid, email, user_type, is_su_admin
+    - user_guid, email, user_type, is_su_admin, session_id
     - Patient: patient_guid, organisation_guid, in_registry, registries
     - Professional: professional_guid, professional_role, organization_ids, groups, effective_phases
+
+    ``session_id`` is the ``sid`` claim from the JWT carrying the
+    request — stable across every /me / /me/service call validated
+    against the same token (ticket #191). Consumers forward it as
+    ``X-Operator-Session-Id`` on onward calls so downstream audit logs
+    can correlate "all reads under this operator session" for the
+    Lag (2022:913) chain-of-custody requirement.
     """
     blob = {
         'user_guid': user.guid,
@@ -51,6 +58,9 @@ def build_access_blob(user, session):
         # Ticket #43: so every page load can detect a pending SU-triggered reset
         # (sibling services honour this via /me/service and can redirect too).
         'must_change_password': bool(getattr(user, 'force_change_on_next_login', False)),
+        # Ticket #191: stable per-session correlation id. None for legacy
+        # tokens issued before #191 landed (no `sid` claim).
+        'session_id': session_id,
     }
 
     if user.user_type == 'patient':

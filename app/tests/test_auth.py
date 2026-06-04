@@ -301,6 +301,82 @@ class TestMe:
         assert resp.status_code == 401
 
 
+# --- Session id (#191) ---
+
+class TestSessionId:
+    """The ``sid`` JWT claim plus its ``session_id`` projection in the
+    access blob — Lag (2022:913) chain-of-custody correlation."""
+
+    def test_issue_token_embeds_sid_claim(self):
+        """``issue_token`` puts a ``sid`` UUID in the payload."""
+        token = issue_token('user-guid-abc', SECRET, expiry_hours=1)
+        payload = decode_token(token, SECRET)
+        assert 'sid' in payload
+        # uuid4 → 36-char canonical
+        assert isinstance(payload['sid'], str)
+        assert len(payload['sid']) == 36
+
+    def test_two_issued_tokens_have_different_sids(self):
+        """Independent logins must NOT share a session id."""
+        t1 = issue_token('user-guid', SECRET, expiry_hours=1)
+        t2 = issue_token('user-guid', SECRET, expiry_hours=1)
+        assert decode_token(t1, SECRET)['sid'] != decode_token(t2, SECRET)['sid']
+
+    def test_me_returns_session_id(self, client, seed_data):
+        login_resp = _login(client, 'pro@test.com', 'propass12')
+        token = login_resp.get_json()['token']
+        resp = client.get('/api/auth/me', headers=_auth_header(token))
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert 'session_id' in data
+        assert data['session_id']  # non-empty string
+
+    def test_consecutive_me_calls_same_token_same_session_id(self, client, seed_data):
+        """Two /me calls with the same Bearer → same session_id."""
+        login_resp = _login(client, 'pro@test.com', 'propass12')
+        token = login_resp.get_json()['token']
+        first = client.get('/api/auth/me', headers=_auth_header(token)).get_json()
+        second = client.get('/api/auth/me', headers=_auth_header(token)).get_json()
+        assert first['session_id'] == second['session_id']
+
+    def test_relogin_issues_fresh_session_id(self, client, seed_data):
+        """A new login (new token) yields a fresh session_id."""
+        first_login = _login(client, 'pro@test.com', 'propass12').get_json()
+        t1 = first_login['token']
+        sid_1 = client.get('/api/auth/me', headers=_auth_header(t1)).get_json()['session_id']
+
+        # Logout first, then relogin so we don't keep two parallel sessions.
+        client.post('/api/auth/logout', headers=_auth_header(t1))
+
+        second_login = _login(client, 'pro@test.com', 'propass12').get_json()
+        t2 = second_login['token']
+        sid_2 = client.get('/api/auth/me', headers=_auth_header(t2)).get_json()['session_id']
+        assert sid_1
+        assert sid_2
+        assert sid_1 != sid_2
+
+    def test_me_service_returns_same_session_id_as_me(self, client, seed_data):
+        """Switching from /me to /me/service with the same token must
+        not produce a new session_id — the token is what carries it."""
+        login_resp = _login(client, 'pro@test.com', 'propass12')
+        token = login_resp.get_json()['token']
+        me_sid = client.get(
+            '/api/auth/me', headers=_auth_header(token)
+        ).get_json()['session_id']
+        svc_sid = client.get('/api/auth/me/service', headers={
+            **_auth_header(token),
+            'X-SSO-Client-Id': 'test-client',
+            'X-SSO-Client-Secret': 'test-secret',
+        }).get_json()['session_id']
+        assert me_sid == svc_sid
+
+    def test_session_id_is_present_for_su_admin(self, client, seed_data):
+        login_resp = _login(client, 'admin@test.com', 'adminpass1')
+        token = login_resp.get_json()['token']
+        data = client.get('/api/auth/me', headers=_auth_header(token)).get_json()
+        assert data['session_id']
+
+
 # --- /me/service ---
 
 class TestMeService:

@@ -100,7 +100,8 @@ def me():
     """GET /api/auth/me — Bearer token → access blob."""
     session = get_db()
     user = g.current_user
-    blob = build_access_blob(user, session)
+    sid = (g.token_payload or {}).get('sid')
+    blob = build_access_blob(user, session, session_id=sid)
     return jsonify(blob), 200
 
 
@@ -122,7 +123,8 @@ def me_service():
 
     session = get_db()
     user = g.current_user
-    blob = build_access_blob(user, session)
+    sid = (g.token_payload or {}).get('sid')
+    blob = build_access_blob(user, session, session_id=sid)
 
     audit('service_auth_success', user_guid=user.guid,
           detail={'client_id': client_id}, ip=request.remote_addr)
