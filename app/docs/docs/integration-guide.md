@@ -172,6 +172,75 @@ def map_action_to_phase(action):
     return ACTION_PHASE_MAP.get(action)
 ```
 
+## Caregiver Roll-up (`parent_caregiver_guid` + `organization_caregivers`)
+
+**Source: tickets #187 / #188 (SSO Phase 1.1 / 1.2). See
+`analysis/sso_pdhc_reform_proposal.md` §4 for the full rationale.**
+
+PDL Ch 4 §§2,4 and Lag (2022:913) §2 presume a two-level
+**vårdgivare → vårdenhet** hierarchy. SSO encodes that on the
+`Organisation` model:
+
+- `Organisation.parent_caregiver_guid`: nullable self-referential FK.
+  - `NULL` → this row IS a **vårdgivare** (caregiver / legal entity).
+  - non-NULL → this row is a **vårdenhet** (clinic / care unit), and
+    the referenced row is its caregiver.
+
+The access blob (for professionals only) exposes a roll-up map so
+consumers can answer *"what caregiver does this org belong to?"*
+without a second SSO call:
+
+```json
+{
+  "user_type": "professional",
+  "organization_ids":          ["clinic-uas-guid"],
+  "organization_caregivers":   {"clinic-uas-guid": "region-uppsala-guid"}
+}
+```
+
+When the org is itself a caregiver (`parent_caregiver_guid` is NULL),
+the map self-rolls — the org's guid maps to its own guid:
+
+```json
+"organization_caregivers": {"region-uppsala-guid": "region-uppsala-guid"}
+```
+
+Stale `UserOrganisation` rows whose `Organisation` row no longer
+exists are silently skipped (no phantom caregiver mapping is
+synthesised).
+
+### Adoption notes per consumer
+
+Each consuming service decides independently when (and how) to adopt
+the new field. The existing `organization_ids` is unchanged — every
+current authorisation path continues to work without modification.
+
+- **dashboard.pdhc** — analyse-phase roll-up: aggregate observation
+  metrics at the caregiver level rather than per-clinic when a
+  researcher's cohort spans multiple vårdenheter of the same
+  vårdgivare. Decision: opt-in toggle at query time (per-clinic vs.
+  per-caregiver) or default-on for cross-clinic cohorts.
+- **cdr_6.pdhc** — block-aware filter (#207): today
+  `author_org_guid` is compared row-by-row. When PDL #2 (#217) wires
+  bearer-token mode, the audit row can carry both the org_guid and
+  its caregiver via the new map so cross-caregiver block policies
+  (planned in #204) need no second join.
+- **ips.pdhc** — `PatientBlock.source_scope_type` is currently
+  `clinic` (caregiver-scope deferred to #204). The new map gives ips
+  a clean path to evaluate caregiver-scoped blocks once #204 lands —
+  the blob already says which caregiver every clinic in the user's
+  scope belongs to.
+
+### Backwards compatibility
+
+- `organization_ids` ships unchanged. Consumers that ignore
+  `organization_caregivers` see no behaviour change.
+- The map only appears on professional blobs. Patient blobs and
+  service-key callers that don't load a full user are unaffected.
+- Backfill of existing rows is the operator-side task in #189;
+  rollout is gradual (unmapped clinics keep `parent_caregiver_guid`
+  NULL until the operator confirms the vårdgivare).
+
 ## Operator Session Correlation (`session_id` + `X-Operator-Session-Id`)
 
 **Source: ticket #191 (SSO Phase 3 — session_id claim).**
