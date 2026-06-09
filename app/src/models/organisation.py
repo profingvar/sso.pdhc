@@ -78,6 +78,21 @@ class Organisation(Base):
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     revoke_reason = Column(Text, nullable=True)
 
+    # ---- PDL caregiver hierarchy (#187) --------------------------------
+    # Encodes the vårdgivare/vårdenhet relationship that PDL Ch 4 §§2,4
+    # and Lag (2022:913) §2 presume:
+    #   NULL     → this row IS a caregiver (vårdgivare; legal entity).
+    #   non-NULL → this row is a vårdenhet (care unit / clinic) whose
+    #              parent caregiver is the guid pointed at.
+    # Cycles are illegal (must be enforced in code; Postgres cannot
+    # express "no cycles in self-referential FK" as a constraint).
+    parent_caregiver_guid = Column(
+        String(36),
+        ForeignKey('organisations.guid'),
+        nullable=True,
+        index=True,
+    )
+
     # Bookkeeping
     updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=_utcnow)
     created_by_user_guid = Column(String(36), ForeignKey('users.guid'), nullable=True)
@@ -134,6 +149,7 @@ class Organisation(Base):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'created_by_user_guid': self.created_by_user_guid,
+            'parent_caregiver_guid': self.parent_caregiver_guid,
         }
 
 

@@ -135,6 +135,46 @@ class TestOrganisationModel:
         assert org.fhir_resource_type == 'Organization'
         assert org.FHIR_RESOURCE_TYPE == 'Organization'
 
+    def test_parent_caregiver_guid_defaults_to_null(self, db_session):
+        """#187. New orgs default to caregiver (NULL parent)."""
+        org = Organisation(name='Caregiver A')
+        db_session.add(org)
+        db_session.commit()
+        assert org.parent_caregiver_guid is None
+
+    def test_clinic_points_at_caregiver(self, db_session):
+        """#187. A vårdenhet (clinic) carries its caregiver's guid in
+        parent_caregiver_guid; round-trip persists."""
+        caregiver = Organisation(name='Caregiver B')
+        db_session.add(caregiver)
+        db_session.commit()
+        clinic = Organisation(
+            name='Clinic of B',
+            parent_caregiver_guid=caregiver.guid,
+        )
+        db_session.add(clinic)
+        db_session.commit()
+        # Reload to prove the value persisted.
+        fetched = (
+            db_session.query(Organisation).filter_by(guid=clinic.guid).one()
+        )
+        assert fetched.parent_caregiver_guid == caregiver.guid
+
+    def test_admin_dict_exposes_parent_caregiver_guid(self, db_session):
+        caregiver = Organisation(name='Caregiver C')
+        db_session.add(caregiver)
+        db_session.commit()
+        clinic = Organisation(
+            name='Clinic of C',
+            parent_caregiver_guid=caregiver.guid,
+        )
+        db_session.add(clinic)
+        db_session.commit()
+        d = clinic.admin_dict()
+        assert 'parent_caregiver_guid' in d
+        assert d['parent_caregiver_guid'] == caregiver.guid
+        assert caregiver.admin_dict()['parent_caregiver_guid'] is None
+
 
 class TestUserOrganisationModel:
     """User-Organisation junction tests."""

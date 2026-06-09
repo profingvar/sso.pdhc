@@ -301,6 +301,87 @@ class TestMe:
         assert resp.status_code == 401
 
 
+# --- Caregiver roll-up in access blob (#188) ---
+
+class TestOrganizationCaregivers:
+    """Ticket #188. Every professional access blob carries an
+    ``organization_caregivers`` map: each organisation guid the user
+    belongs to maps onto its caregiver guid (the organisation's
+    ``parent_caregiver_guid`` if set, else the org's own guid)."""
+
+    def test_self_rollup_when_parent_caregiver_null(
+        self, client, seed_data,
+    ):
+        login_resp = _login(client, 'pro@test.com', 'propass12')
+        token = login_resp.get_json()['token']
+
+        resp = client.get('/api/auth/me', headers=_auth_header(token))
+        data = resp.get_json()
+        assert 'organization_caregivers' in data
+        org_guid = seed_data['org_guid']
+        # Seeded Test Hospital has no parent_caregiver_guid → it IS the
+        # caregiver, so it maps to itself.
+        assert data['organization_caregivers'][org_guid] == org_guid
+
+    def test_map_resolves_to_parent_caregiver(
+        self, client, seed_data, app,
+    ):
+        """A clinic with parent_caregiver_guid → its caregiver guid."""
+        # Wire a fresh caregiver + clinic, and put the regular pro in the
+        # clinic so we can observe the roll-up.
+        with app.app_context():
+            session = get_session()
+            caregiver = Organisation(
+                guid=str(uuid.uuid4()), name='Region North',
+            )
+            session.add(caregiver)
+            session.flush()
+            clinic = Organisation(
+                guid=str(uuid.uuid4()), name='Hospital North',
+                parent_caregiver_guid=caregiver.guid,
+            )
+            session.add(clinic)
+            session.flush()
+            session.add(UserOrganisation(
+                user_guid=seed_data['pro_guid'],
+                organisation_guid=clinic.guid,
+            ))
+            session.commit()
+            caregiver_guid = caregiver.guid
+            clinic_guid = clinic.guid
+            session.close()
+
+        login_resp = _login(client, 'pro@test.com', 'propass12')
+        token = login_resp.get_json()['token']
+        resp = client.get('/api/auth/me', headers=_auth_header(token))
+        data = resp.get_json()
+        assert clinic_guid in data['organization_caregivers']
+        assert data['organization_caregivers'][clinic_guid] == caregiver_guid
+        # And every organization_ids entry has a matching caregivers entry.
+        assert set(data['organization_caregivers'].keys()) == \
+            set(data['organization_ids'])
+
+    def test_patient_blob_does_not_include_caregivers(
+        self, client, seed_data,
+    ):
+        """Patients have no organization_ids; the caregivers map is a
+        professional-side concept only."""
+        login_resp = _login(client, 'patient@test.com', 'patpass12')
+        token = login_resp.get_json()['token']
+        resp = client.get('/api/auth/me', headers=_auth_header(token))
+        data = resp.get_json()
+        assert 'organization_caregivers' not in data
+
+    def test_existing_blob_fields_unchanged(self, client, seed_data):
+        """Backwards compatibility: organization_ids stays as-is."""
+        login_resp = _login(client, 'pro@test.com', 'propass12')
+        token = login_resp.get_json()['token']
+        resp = client.get('/api/auth/me', headers=_auth_header(token))
+        data = resp.get_json()
+        assert seed_data['org_guid'] in data['organization_ids']
+        assert data['organisation_warning'] is False
+
+
 # --- Session id (#191) ---
 
 class TestSessionId:

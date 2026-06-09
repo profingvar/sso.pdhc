@@ -6,6 +6,7 @@ from src.models.user import User
 from src.models.patient import Patient
 from src.models.professional import Professional
 from src.models.membership import Membership
+from src.models.organisation import Organisation
 from src.models.user_organisation import UserOrganisation
 
 
@@ -41,7 +42,8 @@ def build_access_blob(user, session, session_id=None):
     Returns dict with:
     - user_guid, email, user_type, is_su_admin, session_id
     - Patient: patient_guid, organisation_guid, in_registry, registries
-    - Professional: professional_guid, professional_role, organization_ids, groups, effective_phases
+    - Professional: professional_guid, professional_role, organization_ids,
+      organization_caregivers (#188), groups, effective_phases
 
     ``session_id`` is the ``sid`` claim from the JWT carrying the
     request — stable across every /me / /me/service call validated
@@ -83,6 +85,25 @@ def build_access_blob(user, session, session_id=None):
         user_orgs = session.query(UserOrganisation).filter_by(user_guid=user.guid).all()
         blob['organization_ids'] = [uo.organisation_guid for uo in user_orgs]
         blob['organisation_warning'] = len(user_orgs) == 0
+
+        # Caregiver roll-up (#188 / PDL Ch 4 §§2,4). Map every org the
+        # user belongs to onto its parent caregiver — or, when
+        # parent_caregiver_guid is NULL (the org IS a caregiver), onto
+        # the org's own guid. Lets consumers answer "what caregiver
+        # does this org belong to?" without a second SSO call.
+        org_caregivers = {}
+        for uo in user_orgs:
+            org = session.query(Organisation).filter_by(
+                guid=uo.organisation_guid,
+            ).first()
+            if org is None:
+                # Stale junction row; skip so we don't synthesise a
+                # caregiver mapping for an org that no longer exists.
+                continue
+            org_caregivers[uo.organisation_guid] = (
+                org.parent_caregiver_guid or uo.organisation_guid
+            )
+        blob['organization_caregivers'] = org_caregivers
 
         # Groups and phases are independent criteria (#57).
         #
