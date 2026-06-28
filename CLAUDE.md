@@ -47,3 +47,5 @@ The following project rules apply to this service and to the document suite. Sou
 **Rule 22.** The future implementation on the server is fragile and all precaution must be taken to prevent disturbance of other services in the reverse proxy
 
 **Rule23** the .env must be fully prepared and boot strap SU user must be possible to create in the first implementation on the server (macmini). Development is done on tha local MAC.
+
+For canonical cross-service data shapes (the 12-field clinical context, wire alias inventory, deprecation log), see `../plans/pdhc_data_shapes.md`.
