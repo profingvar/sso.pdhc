@@ -411,3 +411,21 @@ Built with MkDocs (Material theme). Source in `app/docs/`, builds to polished st
 | Reserved      | 9001  |
 | Reserved      | 9002  |
 | PostgreSQL DB | 9003  |
+
+
+## Clinical-context schema role (per #294 RFC decision B1, 2026-06-28)
+
+In the PDHC platform's canonical clinical-context schema, sso.pdhc owns
+**org identity** (the org_guid values that appear in
+`organization_ids` of the access blob) — not the
+**requesting-vs-provider role**. The role distinction is contractual:
+contract.pdhc returns `requesting_org_guid` and `provider_org_guids`
+on `/internal/contract/<guid>/scope`, derived from the FHIR
+Contract.party roles.
+
+Consumers that need the role split (gateway, cdr, dashboard) should
+query contract.pdhc, not sso.
+
+See `~/T7_sidewinder/plans/pdhc_clinical_context_harmonisation_plan.md`
+§3 + `clinical_context_audit_2026-06-28.md` §4 decision B.
+
