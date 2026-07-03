@@ -305,3 +305,30 @@ All edited files listed with full path (Rule 17).
     #189 already backfilled parent_caregiver_guid).
   - app/tests/test_care_hierarchy.py (NEW): 17 tests (accessors, queries,
     resolution, validation, scan). Full suite 284 pass, no regressions.
+
+## 2026-07-03 — SSO reform S2/S3/S4/S5/S6 (#398/#399/#400/#401/#402)
+
+  - app/src/models/role.py (NEW, S2): Role registry (RoleDB). 7 seed roles with
+    permitted_phases (Doctor+Nurse also hold analysis, Item 3). LEGACY_ROLE_MAP
+    (doctor/nurse/other -> doctor/nurse/other_care) for the S3 backfill.
+    Phase names use the code-canonical set (planning/request/provider/analysis).
+  - app/src/models/research_project.py (NEW, S4): ResearchProject registry
+    (ResDB), home = sso.pdhc.
+  - app/src/models/affiliation.py (NEW, S3): person↔CareUnit↔Role binding
+    replacing the flat UserOrganisation. guid, person_guid, care_unit_guid,
+    role_guid, research_project_guids[], is_admin, status. Unique per
+    (person, unit, role).
+  - app/src/models/__init__.py: register Role, ResearchProject, Affiliation.
+  - app/src/services/affiliation_service.py (NEW): resolve_session_phases (S5
+    Option C — granted ∩ (role permitted ∪ orthogonal{planning})),
+    build_affiliations_for_blob (S6), and
+    backfill_affiliations_from_user_organisations (S3, legacy-role seeded,
+    idempotent, flags rows needing SU role assignment).
+  - app/src/services/auth_service.py (S6): build_access_blob now also emits
+    affiliations[], active_affiliation_guid, session_phases — ALONGSIDE the
+    legacy organization_ids/professional_role/groups (dual-emit; legacy removed
+    in M0 #409). effective_phases unchanged (raw grant).
+  - app/scripts/backfill_affiliations.py (NEW): deploy step — create_all makes
+    the 3 new tables, seeds roles, backfills affiliations (--dry-run first).
+  - app/tests/test_affiliation_model.py (NEW): 30 tests (role registry, Option-C
+    intersection, backfill, blob assembly). Full sso suite green, no regressions.

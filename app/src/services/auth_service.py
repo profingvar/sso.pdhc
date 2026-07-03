@@ -151,4 +151,29 @@ def build_access_blob(user, session, session_id=None):
         blob['groups'] = groups
         blob['effective_phases'] = sorted(effective_phases)
 
+        # --- Access-model reform (S6, #402): affiliations[] + session phases.
+        # Emitted ALONGSIDE the legacy organization_ids / professional_role /
+        # groups / organization_caregivers (dual-emit) so un-migrated
+        # consumers keep working; the legacy fields are removed in the
+        # consumer-migration cleanup (M0, #409).
+        from src.services.affiliation_service import (
+            build_affiliations_for_blob, active_affiliations,
+            resolve_session_phases,
+        )
+        from src.models.role import Role as _Role
+        blob['affiliations'] = build_affiliations_for_blob(session, user.guid)
+        # Active affiliation: default to the sole one when exactly one exists;
+        # otherwise None (the session selects via the acting-as flow, S9).
+        actives = active_affiliations(session, user.guid)
+        active_guid = actives[0].guid if len(actives) == 1 else None
+        blob['active_affiliation_guid'] = active_guid
+        active_role = None
+        if active_guid:
+            active_role = session.query(_Role).filter_by(
+                guid=actives[0].role_guid).first()
+        # session_phases (S5, Option C): granted ∩ (active role permitted ∪
+        # orthogonal). effective_phases stays the raw grant for dual-emit.
+        blob['session_phases'] = resolve_session_phases(
+            effective_phases, active_role)
+
     return blob

@@ -12,9 +12,15 @@ from src.models.access_request import AccessRequest
 from src.models.invite import Invite
 from src.models.revoked_token import RevokedToken
 from src.models.user_phase import UserPhase
+# Access-model reform (rollup #396): Role registry (S2), ResearchProject
+# registry (S4), Affiliation binding (S3).
+from src.models.role import Role
+from src.models.research_project import ResearchProject
+from src.models.affiliation import Affiliation
 
 __all__ = [
     'User', 'Patient', 'Professional', 'Organisation', 'OrganisationAudit',
     'UserOrganisation', 'Group', 'Membership', 'GroupProposal',
     'LeaderRequest', 'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',
+    'Role', 'ResearchProject', 'Affiliation',
 ]
