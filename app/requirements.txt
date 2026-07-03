@@ -13,12 +13,8 @@ bcrypt>=4.3.0
 Flask-WTF>=1.2.2
 Flask-Cors>=5.0.0
 
-# FHIR
+# HTTP client (service health checks)
+requests>=2.32.0
+
+# FHIR (lazy-loaded at runtime — only consumed on validation calls)
 fhir.resources>=8.0.0
-
-# Testing
-pytest>=8.3.0
-# pytest-flask removed: interferes with session teardown in SQLite StaticPool tests
-
-# Documentation
-mkdocs-material>=9.6.0

@@ -27,8 +27,18 @@ class Config:
     # API key metadata
     KEY_CREATED_AT = os.environ.get('KEY_CREATED_AT', '')
 
+    # Internal service-to-service key (shared with request.pdhc, contract.pdhc)
+    INTERNAL_SERVICE_KEY = os.environ.get('INTERNAL_SERVICE_KEY', '')
+
+    # Health check polling interval (seconds) — 300 = 5 min for dev, increase later
+    HEALTH_CHECK_INTERVAL = int(os.environ.get('HEALTH_CHECK_INTERVAL', '1800'))
+
     # Service credentials: collected as dict {client_id: secret}
     SERVICE_CREDENTIALS = {}
+
+    # Keyed services: collected as dict {service_name: {url, key}}
+    # Populated from KEYAUTH_SERVICE_<NAME>_URL / KEYAUTH_SERVICE_<NAME>_KEY env pairs
+    KEYED_SERVICES = {}
 
     def __init__(self):
         # Collect SSO_CLIENT_ID_* / SSO_CLIENT_SECRET_* pairs
@@ -39,6 +49,19 @@ class Config:
                 secret = os.environ.get(secret_key, '')
                 if value and secret:
                     self.SERVICE_CREDENTIALS[value] = secret
+
+        # Collect KEYAUTH_SERVICE_<NAME>_URL / _KEY pairs
+        seen = set()
+        for key in os.environ:
+            if key.startswith('KEYAUTH_SERVICE_') and key.endswith('_URL'):
+                name = key[len('KEYAUTH_SERVICE_'):-len('_URL')].lower()
+                if name in seen:
+                    continue
+                seen.add(name)
+                url = os.environ.get(key, '').rstrip('/')
+                svc_key = os.environ.get(f'KEYAUTH_SERVICE_{name.upper()}_KEY', '')
+                if url and svc_key:
+                    self.KEYED_SERVICES[name] = {'url': url, 'key': svc_key}
 
     @classmethod
     def validate(cls):

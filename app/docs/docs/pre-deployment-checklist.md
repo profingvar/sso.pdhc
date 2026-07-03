@@ -148,6 +148,23 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ---
 
+## J. Downstream Service Compatibility (#43, #44, #46, #57)
+
+These items verify that every downstream service correctly consumes the SSO blob semantics introduced in the #43/#44/#46/#57 ticket run. Run per subservice before declaring cross-platform ready.
+
+| # | Item | Action | Done |
+|---|------|--------|------|
+| J.1 | Blob re-validation per request | Confirm the service calls `/api/auth/me/service` on every protected request (no session-side blob caching). See `subservice-onboarding.md` §4.2 | [ ] |
+| J.2 | `must_change_password` honoured (#43) | Force `force_change_on_next_login = True` on a test user, hit a protected route on the service, confirm the user is routed to `${SSO_BASE_URL}/change-password` (HTML) or gets a 403 with the URL (API/FHIR) | [ ] |
+| J.3 | 401-on-epoch handled (#44) | Call `POST /api/admin/users/<guid>/flush-sessions`, then retry a pre-flush Bearer on the service — expect the service to clear local session and bounce back to SSO login | [ ] |
+| J.4 | Phase grants visible (#46) | Grant a phase via `POST /api/admin/users/<guid>/phases`, confirm the service's next authorisation check sees the phase via `effective_phases` without requiring a user re-login | [ ] |
+| J.5 | Phase revocation (#46 + #57) | Revoke via `DELETE /api/admin/users/<guid>/phases/<phase>`, confirm the phase disappears from `effective_phases`. (Under #57 this is the only source — there is no "group-derived" branch that could preserve it.) | [ ] |
+| J.6 | Groups do NOT grant phases (#57) | Add a test professional to an approved `planning`-typed group membership with no `UserPhase` row. Confirm the service returns 403 on a `planning`-gated route. Groups are orthogonal category metadata and must not be treated as phase grants | [ ] |
+| J.7 | Access-request approval does not auto-grant (#57) | Approve an access request whose `requested_phases` includes `planning`. Confirm no `UserPhase` rows are created and the approval response reports `requested_phases_pending_su_grant` | [ ] |
+| J.8 | Pre-#57 migration review | Run `python scripts/phases_migration_report.py` on a copy of the production DB. Review the list of users who previously held a phase via group membership and explicitly grant via the admin API for those who should keep access | [ ] |
+
+---
+
 ## Quick Reference — What Must Be Changed
 
 For rapid scanning, here is every value in `.env` that **must** be changed from the development default before production use:

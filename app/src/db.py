@@ -56,18 +56,27 @@ def get_db():
 
 
 def close_db(exception=None):
-    """Teardown: commit or rollback, then close session."""
+    """Teardown: commit or rollback, then close session.
+
+    Never re-raises — teardown errors must not kill gunicorn workers.
+    """
     session = g.pop('db_session', None)
     if session is not None:
-        if exception:
-            session.rollback()
-        else:
-            try:
-                session.commit()
-            except Exception:
+        try:
+            if exception:
                 session.rollback()
-                raise
-        session.close()
+            else:
+                try:
+                    session.commit()
+                except Exception:
+                    session.rollback()
+        except Exception:
+            pass  # Teardown must not crash the worker
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
 
 
 @contextmanager

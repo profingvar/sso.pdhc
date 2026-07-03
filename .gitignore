@@ -25,3 +25,11 @@ site/
 .idea/
 *.swp
 *.swo
+
+# Runtime logs
+app/logs/
+logs/
+*.log
+
+# Deploy artifacts (predeploy tarballs live in ~/backups/predeploy, not the repo)
+*_deploy_*.tar.gz

@@ -75,6 +75,85 @@ Upload a CSV file to bulk-create users. Requirements:
 
 ---
 
+### Forcing a Password Reset (#43)
+
+Use when a user has forgotten their password, a credential has leaked, or compliance requires rotation.
+
+1. Locate the user in the admin panel
+2. Click **Reset password** (or POST to the endpoint below)
+3. Optionally supply a temporary password; if omitted, the server generates one and returns it
+4. Communicate the temporary password to the user out-of-band (phone, in-person)
+
+**What happens next:**
+
+- The server sets `force_change_on_next_login = True` on the user
+- Their next authenticated request to any PDHC service causes `/api/auth/me/service` to return `must_change_password: true`
+- Every downstream service (dashboard, plan, contract, request, rosetta, cdr, ips, gateway) is wired to redirect the user to `sso.pdhc.se/change-password` until they pick a new password
+- Once the user successfully posts `POST /api/auth/change-password`, the flag clears automatically and they are unblocked on every service
+
+**API:** `POST /api/admin/users/<user_guid>/reset-password` with optional `{temporary_password}`
+
+!!! note "This does not kill existing tokens"
+    The user's existing JWTs are not invalidated — they just hit a forced redirect on every call. If you also want to terminate every active session (e.g. after credential theft), call **Flush Sessions** immediately after.
+
+### Flushing User Sessions (#44)
+
+Use when you need to invalidate **every** active JWT for a user in one operation — typically after a credential compromise, lost device, or role change.
+
+1. Locate the user in the admin panel
+2. Click **Flush sessions**
+
+**What happens:**
+
+- The server sets `user.token_revocation_epoch = now()`
+- Every existing JWT for this user (on every device, every service) starts returning **401** on the next `/me/service` call, because its `iat` timestamp is older than the new epoch
+- Downstream services must treat that 401 as "session terminated" — they wipe their local session and bounce the user through SSO login again
+- The user must re-login anywhere they were signed in
+
+**API:** `POST /api/admin/users/<user_guid>/flush-sessions` (empty body)
+
+!!! note "Why not use the token revocation list?"
+    The per-JWT revocation list (`RevokedToken` / `jti`) works well when a single token is being revoked (e.g. the `/api/auth/logout` path), but it requires knowing every `jti` that is currently in circulation. `flush-sessions` is the right primitive when you simply want "all tokens issued before now are void."
+
+### Managing Phase Grants (#46 + #57)
+
+After #57, **direct `UserPhase` grants are the sole source of phase access**. Groups are orthogonal organisational/category metadata — an approved membership in a `planning`-typed group does **not** grant the `planning` phase. Every phase assignment goes through an explicit SU decision.
+
+This separation lets each downstream service compose its own access policy from independent inputs (phase, group membership, org scope) rather than inheriting one conflated "group = phase" rule.
+
+**View a user's direct grants:**
+
+```
+GET /api/admin/users/<user_guid>/phases
+```
+
+Response includes `direct_phases` and `effective_phases` (now identical — groups no longer contribute).
+
+**Grant a phase:**
+
+```
+POST /api/admin/users/<user_guid>/phases
+Body: {"phase": "analysis"}
+```
+
+The phase appears in `effective_phases` on the user's next blob call; no re-login required. Idempotent.
+
+**Revoke a phase:**
+
+```
+DELETE /api/admin/users/<user_guid>/phases/<phase>
+```
+
+Removes the `UserPhase` row. Since #57 this is sufficient on its own — there is no second "group-derived" source that could keep the phase alive. Group cleanup, if desired, is a separate SU action.
+
+!!! info "Access-request approval no longer auto-grants phases (#57)"
+    Approving an access request creates the professional and their group membership(s) but **does not** create `UserPhase` rows — even if the request's `requested_phases` names `planning`/`request`/etc. The approval response lists `requested_phases_pending_su_grant`; SU must then call `POST /api/admin/users/<guid>/phases` for each phase the user should actually hold.
+
+!!! tip "Migration from pre-#57 installations"
+    A read-only report — `python scripts/phases_migration_report.py` — lists every user who previously had a phase implicitly via group membership but has no matching `UserPhase` row. SU should review the list and grant explicitly. Nothing is auto-backfilled.
+
+---
+
 ### Organisation Management
 
 Organisations are the **single source of truth** across all PDHC services.
@@ -225,5 +304,8 @@ All admin actions are logged to structured audit files in `LOG_DIR`:
 - Access request decisions
 - Organisation changes
 - Oath overview updates
+- Forced password resets (#43) — actor, target, whether a temp password was supplied
+- Session flushes (#44) — actor, target, new `token_revocation_epoch`
+- Direct phase grants and revocations (#46)
 
 Logs include: timestamp, action type, actor GUID, target GUID, IP address, and action-specific details.

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Initialise database — creates all tables. DESTRUCTIVE: drops existing tables first.
-Only run on a fresh database or when you want to reset everything."""
+"""Initialise database — creates missing tables (idempotent).
+
+Use --reset flag to drop and recreate all tables (DESTRUCTIVE).
+"""
 import os
 import sys
 
@@ -21,17 +23,22 @@ def main():
         print("ERROR: DATABASE_URL not set. Check your .env file.")
         sys.exit(1)
 
+    reset = '--reset' in sys.argv
+
     print(f"Connecting to: {database_url.split('@')[1] if '@' in database_url else database_url}")
 
     init_db(database_url)
 
-    print("Dropping all tables...")
-    drop_all_tables()
-
-    print("Creating all tables...")
-    create_all_tables()
-
-    print("Database initialised successfully.")
+    if reset:
+        print("WARNING: --reset flag set. Dropping all tables...")
+        drop_all_tables()
+        print("Creating all tables...")
+        create_all_tables()
+        print("Database RESET complete.")
+    else:
+        print("Creating missing tables (existing data preserved)...")
+        create_all_tables()
+        print("Database initialised successfully.")
 
 
 if __name__ == '__main__':

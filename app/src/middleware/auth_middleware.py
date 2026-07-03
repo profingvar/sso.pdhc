@@ -1,7 +1,8 @@
 """Auth middleware — decorators for route protection. All use GUID from token."""
+import hmac as hmac_mod
 from functools import wraps
 
-from flask import request, jsonify, g
+from flask import current_app, request, jsonify, g
 
 from src.db import get_db
 from src.services.jwt_service import (
@@ -92,6 +93,43 @@ def require_patient(f):
             return jsonify({"error": "authentication_required", "message": "Valid Bearer token required"}), 401
         if user.user_type != 'patient':
             return jsonify({"error": "forbidden", "message": "Patient access required"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+def require_organisation(f):
+    """Require professional user has at least one organisation membership.
+    SU admins bypass this check."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = _get_current_user()
+        if user is None:
+            return jsonify({"error": "authentication_required", "message": "Valid Bearer token required"}), 401
+        if user.is_su_admin:
+            return f(*args, **kwargs)
+        if user.user_type != 'professional':
+            return f(*args, **kwargs)
+        from src.models.user_organisation import UserOrganisation
+        session = get_db()
+        has_org = session.query(UserOrganisation).filter_by(user_guid=user.guid).first()
+        if has_org is None:
+            return jsonify({"error": "organisation_required",
+                            "message": "Organisation membership required. Contact your administrator."}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+def require_service_key(f):
+    """Require X-Service-Key header for internal service-to-service calls.
+    Uses constant-time comparison."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        key = current_app.config.get('INTERNAL_SERVICE_KEY')
+        if not key:
+            return jsonify({'error': 'unauthorized'}), 401
+        provided = request.headers.get('X-Service-Key', '')
+        if not provided or not hmac_mod.compare_digest(provided, key):
+            return jsonify({'error': 'unauthorized'}), 401
         return f(*args, **kwargs)
     return decorated
 

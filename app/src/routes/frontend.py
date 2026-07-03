@@ -11,6 +11,7 @@ import re
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, session, g, current_app, send_from_directory, abort,
+    jsonify,
 )
 
 from src.db import get_db
@@ -1765,3 +1766,107 @@ def docs_download(filename):
         abort(404)
     docs_dir = os.path.join(current_app.root_path, '..', 'docs', 'docs')
     return send_from_directory(docs_dir, filename, as_attachment=True)
+
+
+# --------------------------------------------------------------------------
+# Service key management — JSON endpoints called by su_admin.html JS
+# --------------------------------------------------------------------------
+
+def _require_su_json(f):
+    """Like _require_su_login but returns JSON 401/403 instead of redirect."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = _get_session_user()
+        if user is None:
+            return jsonify(error='authentication_required'), 401
+        if not user.is_su_admin:
+            return jsonify(error='forbidden', message='SU admin access required'), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _get_keyed_service(service_name):
+    """Look up a keyed service by name. Returns (url, key) or (None, None)."""
+    services = current_app.config.get('KEYED_SERVICES', {})
+    svc = services.get(service_name)
+    if not svc:
+        return None, None
+    return svc['url'], svc['key']
+
+
+@frontend_bp.route('/api/admin/service-keys', methods=['GET'])
+@_require_su_json
+def list_keyed_services():
+    """List configured keyed services."""
+    services = current_app.config.get('KEYED_SERVICES', {})
+    return jsonify(services=list(services.keys())), 200
+
+
+@frontend_bp.route('/api/admin/service-keys/<service_name>/users', methods=['GET'])
+@_require_su_json
+def service_key_users(service_name):
+    """Proxy: list users+keys on a keyed service."""
+    import requests as _requests
+
+    base_url, svc_key = _get_keyed_service(service_name)
+    if not base_url:
+        return jsonify(error='unknown_service',
+                       message=f'Service "{service_name}" not configured'), 404
+
+    try:
+        r = _requests.get(
+            f'{base_url}/keyauth/api/users',
+            headers={'X-Internal-Service-Key': svc_key},
+            timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except _requests.exceptions.ConnectionError:
+        return jsonify(error='connection_error',
+                       message=f'Cannot reach {service_name}'), 502
+    except _requests.exceptions.Timeout:
+        return jsonify(error='timeout',
+                       message=f'{service_name} did not respond in time'), 504
+
+
+@frontend_bp.route('/api/admin/service-keys/<service_name>/generate', methods=['POST'])
+@_require_su_json
+def service_key_generate(service_name):
+    """Proxy: generate a key on a keyed service."""
+    import requests as _requests
+
+    base_url, svc_key = _get_keyed_service(service_name)
+    if not base_url:
+        return jsonify(error='unknown_service',
+                       message=f'Service "{service_name}" not configured'), 404
+
+    user = _get_session_user()
+    body = request.get_json(silent=True) or {}
+
+    try:
+        r = _requests.post(
+            f'{base_url}/keyauth/api/generate-key',
+            headers={
+                'X-Internal-Service-Key': svc_key,
+                'Content-Type': 'application/json',
+            },
+            json=body,
+            timeout=10,
+        )
+        result = r.json()
+
+        if r.status_code == 201:
+            audit('service_key_generated', user_guid=user.guid,
+                  detail={
+                      'service': service_name,
+                      'target_username': body.get('username', ''),
+                      'label': body.get('label', ''),
+                  }, ip=request.remote_addr)
+
+        return jsonify(result), r.status_code
+    except _requests.exceptions.ConnectionError:
+        return jsonify(error='connection_error',
+                       message=f'Cannot reach {service_name}'), 502
+    except _requests.exceptions.Timeout:
+        return jsonify(error='timeout',
+                       message=f'{service_name} did not respond in time'), 504

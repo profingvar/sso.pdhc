@@ -143,6 +143,9 @@ LOG_DIR=/var/log/sso
 !!! warning
     Change `BOOTSTRAP_SU_PASSWORD` immediately after first login. Rotate `SECRET_KEY` if compromised — this invalidates all active JWTs.
 
+!!! warning "Downstream services must not cache the access blob"
+    After deploy, confirm that every integrated downstream service re-validates each protected request against `/api/auth/me/service`. Caching the blob silently defeats `must_change_password` (#43), the per-user session flush (#44), and direct phase grants/revocations (#46). See `subservice-onboarding.md` §4.2.
+
 ### `safe_restart.sh`
 
 For restarting the service on the server without downtime issues:
@@ -227,6 +230,11 @@ After deploying to a new environment:
 - [ ] SSL certificate active
 - [ ] `oath_overview.csv` populated with initial service entry
 - [ ] Audit log directory exists and is writable
+- [ ] Schema includes `users.force_change_on_next_login` (bool, default false) and `users.token_revocation_epoch` (timestamp, nullable) — migrations from #43/#44
+- [ ] Schema includes `user_phases` table (columns: `id`, `guid`, `user_guid`, `phase`, `granted_by_guid`, `granted_at`) — migration from #46
+- [ ] Spot-check a downstream `/me/service` call returns `must_change_password` and `effective_phases` fields in the blob
+- [ ] `effective_phases` sourced only from `UserPhase` (#57) — verified via `scripts/phases_migration_report.py`, with SU having explicitly granted phases to every user who should retain access after the cutover
+- [ ] Access-request approval on this deployment no longer auto-creates `UserPhase` rows — confirm by test-approving a request and checking the response includes `requested_phases_pending_su_grant` (#57)
 
 ---
 

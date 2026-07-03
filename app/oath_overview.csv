@@ -1,1 +1,14 @@
 service_name,service_url,api_health_url,capability_statement_url,endpoints_url,privilege_level,notes
+sso.pdhc,https://sso.pdhc.se,https://sso.pdhc.se/api/health,—,—,public,OAuth 2.0 + PKCE identity provider
+plan.pdhc,https://plan.pdhc.se,https://plan.pdhc.se/api/health,https://plan.pdhc.se/api/v1/metadata,https://plan.pdhc.se/api/v1/endpoints,authenticated,FHIR R5 PlanDefinition Builder — planning phase
+ips.pdhc,https://ips.pdhc.se,https://ips.pdhc.se/api/v1/health,https://ips.pdhc.se/api/v1/metadata,—,authenticated,International Patient Summaries — FHIR bundles
+contract.pdhc,https://contract.pdhc.se,https://contract.pdhc.se/health,https://contract.pdhc.se/fhir/metadata,—,authenticated,Healthcare contracts — FHIR R5
+request.pdhc,https://request.pdhc.se,https://request.pdhc.se/api/health,—,—,authenticated,Patient records and ServiceRequest dispatch
+gateway.pdhc,https://gateway.pdhc.se,https://gateway.pdhc.se/api/v1/health,—,—,provider-token,Provider data ingestion — FHIR Observations and QuestionnaireResponses
+provider1.pdhc,https://provider1.pdhc.se,https://provider1.pdhc.se/api/v1/health,—,—,provider-token,Care provider portal — receives tasks and submits completion reports
+1177.pdhc,https://1177.pdhc.se,https://1177.pdhc.se/api/health,—,—,api-key,Patient questionnaire assignments — FHIR QuestionnaireResponse
+cgm.pdhc,https://cgm.pdhc.se,https://cgm.pdhc.se/api/v1/health,—,—,api-key,Continuous glucose monitoring — background observation streaming
+cdr.pdhc,https://cdr.pdhc.se,https://cdr.pdhc.se/healthz,—,—,authenticated,Clinical Data Repository — gateway observation ingestion and Cambio delivery
+dashboard.pdhc,https://dashboard.pdhc.se,https://dashboard.pdhc.se/healthz,—,—,authenticated,Analysis-phase reporting dashboard — aggregates gateway observations
+rosetta.pdhc,https://rosetta.pdhc.se,https://rosetta.pdhc.se/healthz,https://rosetta.pdhc.se/metadata,—,authenticated,Clinical data translator — OMOP/SNOMED/LOINC vocabulary bridge
+forms.pdhc,https://forms.pdhc.se,https://forms.pdhc.se/api/health,—,—,api-key,Form templates and QuestionnaireResponse authoring

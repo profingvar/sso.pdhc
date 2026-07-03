@@ -18,8 +18,8 @@ If you arrived from another service (SSO handshake), you will be automatically r
 After login, the dashboard shows:
 
 - **Your role** — professional type (doctor, nurse, other)
-- **Your groups** — approved group memberships with type and admin status
-- **Effective phases** — which service phases you have access to
+- **Your groups** — approved group memberships (with category and admin status). Groups are organisational/category metadata — they list who you work with, not what you can do.
+- **Effective phases** — which service phases you have access to. Phases are granted independently by an SU admin and are orthogonal to group membership.
 - **Organisation** — your affiliated organisation(s)
 
 ### Requesting Group Membership
@@ -30,6 +30,9 @@ To join an existing group:
 2. Submit the request
 3. A group admin or SU admin will review your request
 4. You will appear in the group once approved
+
+!!! note "Joining a group does not grant phase access"
+    Group membership shows who you are associated with (e.g. "Oncology Planning"). It does not by itself give you access to any service phase. If you need access to a new phase, ask an SU admin to grant it via `Admin → User phases`.
 
 ### Joining by Invite
 
@@ -61,6 +64,17 @@ To request admin privileges for a group you belong to:
 2. Enter your current password
 3. Enter a new password (minimum 8 characters)
 4. Confirm — you remain logged in
+
+### When an Admin Resets Your Password
+
+An SU administrator can force you to pick a new password (for example, after you report a forgotten password or a suspected leak). When this happens:
+
+1. The admin communicates a **temporary password** to you out-of-band (by phone or in person)
+2. The next time you open *any* PDHC service (dashboard, plan, contract, request, cgm, rosetta, etc.) you will be **automatically redirected** to the SSO change-password page — you cannot use those services until you set a new password
+3. Log in with the temporary password if prompted, then set a new one on `sso.pdhc.se/change-password`
+4. Once you submit a new password successfully, every service unblocks on your next click — no need to log back in everywhere
+
+If you are instead told that **all your sessions have been cleared** (a separate admin action, typically for a security incident), you will simply be logged out everywhere and asked to log in again with your existing password. No automatic redirect to change-password in that case.
 
 ---
 
@@ -109,13 +123,13 @@ If you are a new professional who does not yet have an account:
    - **First name** and **Last name**
    - **Professional role** — doctor, nurse, or other
    - **Organisation** — select from the dropdown
-   - **Requested phases** — which service phases you need access to
+   - **Requested phases** — which service phases you need access to (this is a *request*; an SU admin decides which to grant)
    - **Chosen leader** — select a group leader or SU admin who can endorse you
 3. Submit your request
 4. Wait for review:
    - A leader may **endorse** your request
-   - An SU admin **approves** and creates your account
-5. Once approved, log in with the credentials you provided
+   - An SU admin **approves** and creates your account. Group membership(s) are created at this step; phase grants are **not** — the SU reviews your requested phases and grants them explicitly as a separate action (#57).
+5. Once approved, log in with the credentials you provided. If your SU has not yet granted the phases you requested, phase-gated services will return 403 until they do.
 
 ---
 
@@ -129,7 +143,7 @@ When you click a link to another PDHC service:
 2. If not, you see the SSO login form
 3. After login, you are sent back to the original service
 
-Your access level in each service depends on your groups and phases in the SSO system.
+Your access level in each service depends on your phases (for action gating) and your groups + organisation (for scope and category). Each service composes its own policy from these independent inputs.
 
 ### Viewing Documentation
 

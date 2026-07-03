@@ -82,6 +82,14 @@ def login():
 
     audit('login_success', user_guid=user.guid, detail={'email': email}, ip=request.remote_addr)
 
+    # Ticket #43: signal that SU has forced a password change.
+    # Clients must still treat the token as valid for /api/auth/change-password,
+    # but must redirect the user through the change-password flow before any
+    # other action. We do not down-scope the token here — clients honour the
+    # flag and re-validate on each navigation via /api/auth/me (which also
+    # exposes it, see below).
+    must_change = bool(getattr(user, 'force_change_on_next_login', False))
+
     # SSO handshake redirect
     if next_url:
         if not _is_allowed_callback(next_url, config):
@@ -89,9 +97,15 @@ def login():
         params = {'token': token}
         if state:
             params['state'] = state
+        if must_change:
+            params['must_change_password'] = '1'
         return redirect(f"{next_url}?{urlencode(params)}")
 
-    return jsonify({"token": token, "user_guid": user.guid}), 200
+    return jsonify({
+        "token": token,
+        "user_guid": user.guid,
+        "must_change_password": must_change,
+    }), 200
 
 
 @auth_bp.route('/me', methods=['GET'])
@@ -177,5 +191,9 @@ def change_password():
                         "message": "Current password is incorrect"}), 401
 
     user.password_hash = hash_password(new_password)
+    # Ticket #43: clear the SU-set force-change flag on successful self-service
+    # change, and stamp password_changed_at for audit purposes.
+    user.force_change_on_next_login = False
+    user.password_changed_at = datetime.now(timezone.utc)
     audit('change_password_success', user_guid=user.guid, ip=request.remote_addr)
     return jsonify({"message": "Password changed successfully"}), 200

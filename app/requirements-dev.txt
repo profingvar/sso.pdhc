@@ -1,0 +1,8 @@
+# Development/testing dependencies — NOT installed on the server
+-r requirements.txt
+
+# Testing
+pytest>=8.3.0
+
+# Documentation
+mkdocs-material>=9.6.0
