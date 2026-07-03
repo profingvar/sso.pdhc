@@ -108,6 +108,55 @@ class Organisation(Base):
         kind = 'external' if self.is_external else 'internal'
         return f'<Organisation {kind}: {self.name}>'
 
+    # ----- CareOrganisation / CareUnit views (reform S1, ticket #397) ----
+    # The legal 2-level PDL hierarchy (vårdgivare -> vårdenhet) is encoded on
+    # THIS single self-referential table via parent_caregiver_guid (#187).
+    # Ticket #96 deliberately keeps external partners in the same table so
+    # FHIR Contract.signer.party.reference uniformly points at Organisation;
+    # we therefore do NOT split into two physical tables. Instead we expose
+    # clean CareOrganisation / CareUnit views here for the reform's
+    # affiliation model (S3) and access blob (S6).
+    #
+    #   CareOrganisation (vårdgivare / data holder) = internal, parent NULL
+    #   CareUnit         (vårdenhet / clinic)       = internal, parent set
+    #   external partner                            = neither (is_external)
+
+    @property
+    def is_care_organisation(self):
+        """True if this row is a CareOrganisation (data holder)."""
+        return (not self.is_external) and self.parent_caregiver_guid is None
+
+    @property
+    def is_care_unit(self):
+        """True if this row is a CareUnit (clinic under a CareOrganisation)."""
+        return (not self.is_external) and self.parent_caregiver_guid is not None
+
+    @property
+    def care_organisation_guid(self):
+        """The CareOrganisation this row resolves to:
+          CareUnit -> its parent caregiver guid;
+          CareOrganisation -> its own guid;
+          external partner -> None (not part of the care hierarchy).
+        """
+        if self.is_external:
+            return None
+        return self.parent_caregiver_guid or self.guid
+
+    def care_unit_dict(self):
+        """Projection of this row AS a CareUnit (dropdowns / blob)."""
+        return {
+            'care_unit_guid': self.guid,
+            'care_unit_name': self.name,
+            'care_organisation_guid': self.care_organisation_guid,
+        }
+
+    def care_organisation_dict(self):
+        """Projection of this row AS a CareOrganisation (dropdowns / blob)."""
+        return {
+            'care_organisation_guid': self.guid,
+            'care_organisation_name': self.name,
+        }
+
     # ----- Projections ---------------------------------------------------
 
     def public_dict(self):

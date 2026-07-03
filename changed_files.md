@@ -283,3 +283,25 @@ All edited files listed with full path (Rule 17).
 | 2026-04-29 | plans/external_partners_plan.md, plans/external_partners_plan.docx | NEW — design doc for the External Partners feature: scope/non-goals, current-state diagnosis (what's wrong with Service Key Management today), schema, auth integration via the existing service-key path with `partner:<guid>` source prefix, admin UX, contract.pdhc reference convention (`https://sso.pdhc.se/Partner/<guid>` URL in `Contract.signer.party.reference`), 7-step rollout, 5 open questions answered, references. The .docx is a render of the .md preserving headings, tables, code blocks. |
 
 | 2026-04-29 | app/src/models/organisation.py, app/src/routes/partners.py, app/tests/* | Ticket #96 — folded `external_partner` and `external_partner_audit` into a single `organisations` table with an `is_external` boolean and the partner-specific columns nullable. New `organisation_audit` table replaces `external_partner_audit`. Drops the old `https://sso.pdhc.se/Partner/<guid>` Contract.signer.party reference convention in favour of FHIR-canonical `Organisation/<guid>` so contracts uniformly reference Organisation regardless of internal/external. API surface kept stable (`/api/admin/partners/*`), responses carry both `partner_guid` (legacy alias) and `guid` (canonical) for SU-page JS continuity. Migration applied on miserver: 18 new columns on `organisations`, FK to `users.guid` for `created_by_user_guid`, `external_partner*` tables and their enums dropped. 22/22 partner tests + 253/253 full sso suite green. Closed ticket #96 via /api/tickets/96/respond. |
+
+## 2026-07-03 — SSO reform S1 (#397): CareOrganisation / CareUnit views
+
+  - app/src/models/organisation.py: added CareOrganisation/CareUnit views on
+    the existing self-referential organisations table (is_care_organisation,
+    is_care_unit, care_organisation_guid properties + care_unit_dict /
+    care_organisation_dict projections). NO physical table split — the 2-level
+    hierarchy already exists via parent_caregiver_guid (#187), and #96 keeps
+    external partners in the same table for FHIR reference integrity. Decision
+    2026-07-03: formalise the existing hierarchy, not split.
+  - app/src/services/care_hierarchy.py (NEW): query helpers
+    (list_care_organisations, list_care_units, care_units_for_organisation),
+    name resolution (care_unit_name, care_organisation_name,
+    resolve_care_organisation_guid) for S3/S6 to build on, and the 2-level
+    integrity guard validate_care_hierarchy (rejects self-parent, missing
+    parent, external parent, unit-under-unit) + scan_violations.
+  - app/scripts/verify_care_hierarchy.py (NEW): read-only hygiene scan — reports
+    any care unit that doesn't resolve to a valid top-level care organisation.
+    For the operator to run on the server (verification, not migration —
+    #189 already backfilled parent_caregiver_guid).
+  - app/tests/test_care_hierarchy.py (NEW): 17 tests (accessors, queries,
+    resolution, validation, scan). Full suite 284 pass, no regressions.
