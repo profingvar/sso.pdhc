@@ -776,11 +776,24 @@ def create_organisation():
         return jsonify({"error": "conflict", "message": "Organisation name already exists"}), 409
 
     org = Organisation(name=name)
+    # S8 (#410): a new org may declare its parent vårdgivare, making it a
+    # CareUnit; validate the 2-level care hierarchy before committing.
+    parent_guid = (data.get('parent_caregiver_guid') or '').strip() or None
+    if parent_guid:
+        org.parent_caregiver_guid = parent_guid
     session.add(org)
     session.flush()
 
+    from src.services.care_hierarchy import validate_care_hierarchy, HierarchyError
+    try:
+        validate_care_hierarchy(session, org)
+    except HierarchyError as e:
+        session.rollback()
+        return jsonify({"error": "invalid_hierarchy", "message": str(e)}), 400
+
     audit('create_organisation', user_guid=caller.guid,
-          detail={'org_guid': org.guid, 'name': name}, ip=request.remote_addr)
+          detail={'org_guid': org.guid, 'name': name,
+                  'parent_caregiver_guid': parent_guid}, ip=request.remote_addr)
 
     return jsonify({
         'resourceType': Organisation.FHIR_RESOURCE_TYPE,
@@ -818,7 +831,18 @@ def update_organisation(org_guid):
     if 'push_secret' in data:
         org.push_secret = data['push_secret'].strip() or None
 
+    if 'parent_caregiver_guid' in data:
+        # S8 (#410): allow re-parenting; validate the 2-level care hierarchy.
+        org.parent_caregiver_guid = (data['parent_caregiver_guid'] or '').strip() or None
+
     session.flush()
+
+    from src.services.care_hierarchy import validate_care_hierarchy, HierarchyError
+    try:
+        validate_care_hierarchy(session, org)
+    except HierarchyError as e:
+        session.rollback()
+        return jsonify({"error": "invalid_hierarchy", "message": str(e)}), 400
 
     audit('update_organisation', user_guid=caller.guid,
           detail={'org_guid': org.guid, 'fields': list(data.keys())}, ip=request.remote_addr)

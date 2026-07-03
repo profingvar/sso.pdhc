@@ -36,6 +36,9 @@ class TestAllTablesCreated:
         'leader_requests', 'access_requests', 'invites', 'revoked_tokens',
         'user_phases',  # #46: direct phase grants
         'organisation_audit',  # ticket #96: audit log for org/partner changes
+        'roles',  # reform S2 #398: role registry
+        'research_projects',  # reform S4 #400: research-project registry
+        'affiliations',  # reform S3 #399: person<->care_unit<->role
     ]
 
     def test_all_tables_exist(self, db_session):

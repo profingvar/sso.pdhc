@@ -122,6 +122,9 @@ def create_app(config_override=None):
     from src.routes.partners import partners_bp
     app.register_blueprint(partners_bp)
 
+    from src.routes.registry import registry_bp
+    app.register_blueprint(registry_bp)
+
     # Exempt API blueprints from CSRF — they use Bearer tokens, not cookies
     from src.middleware.csrf import csrf
     for bp in [auth_bp, patient_bp, groups_bp, admin_bp, public_bp, fhir_bp, internal_bp, partners_bp]:

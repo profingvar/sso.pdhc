@@ -350,3 +350,22 @@ All edited files listed with full path (Rule 17).
   patient-login identity anchor — cannot be elsewhere). Neither the
   professional nor the patient access blob emits it (verified). Added json
   import.
+
+## 2026-07-03 — Access-model reform S8 (#410): SU-only registry management
+- app/src/routes/registry.py — NEW. /api/registry blueprint. Role +
+  ResearchProject full CRUD (SU-only writes via @require_su; reads open to any
+  authenticated professional). Read projections for CareOrganisation +
+  CareUnit dropdowns (care-organisations, care-units?care_organisation_guid=).
+  Role delete refuses if any Affiliation references it (409). Audit events
+  registry.{role,research_project}.{create,update,delete}.
+- app/src/app.py — register registry_bp.
+- app/src/routes/admin.py — wire validate_care_hierarchy into
+  create_organisation + update_organisation: accept parent_caregiver_guid,
+  validate the 2-level care hierarchy before commit, return 400
+  invalid_hierarchy on violation.
+- app/tests/test_registry.py — NEW, 15 tests: non-SU write→403 for each
+  registry, reads open, SU CRUD, phase validation, hierarchy guard rejects
+  3-level + unknown parent.
+- app/tests/test_models.py — EXPECTED_TABLES += roles, research_projects,
+  affiliations (reform tables now part of the schema).
+- Full suite: 328/328 pass (was 313 + 15 new).
