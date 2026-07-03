@@ -1,4 +1,5 @@
 """Phase 4 tests — authentication API: login, me, me/service, logout, change-password."""
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -304,6 +305,26 @@ class TestMe:
         assert data['in_registry'] is True
         assert 'INCA' in data['registries']
         assert data['fhir_resource_type'] == 'Patient'
+
+    def test_blob_never_leaks_personnummer(self, client, seed_data):
+        """D2 (#405) — personnummer confinement guard.
+
+        Personnummer is confined to the ips PatientDB (PatientIndex identifier).
+        The SSO access blob is consumed by every downstream service and must
+        NEVER carry it, for any user type. The seeded patient has personnummer
+        '199001011234'; assert it appears in no key and no value of any blob,
+        and that no key is literally 'personnummer'."""
+        pnr = '199001011234'
+        for email, pw in [('pro@test.com', 'propass12'),
+                          ('patient@test.com', 'patpass12'),
+                          ('admin@test.com', 'adminpass1')]:
+            token = _login(client, email, pw).get_json()['token']
+            data = client.get('/api/auth/me',
+                              headers=_auth_header(token)).get_json()
+            flat = json.dumps(data)
+            assert pnr not in flat, f'personnummer leaked into {email} blob'
+            assert 'personnummer' not in data, \
+                f"blob for {email} must not carry a 'personnummer' key"
 
     def test_me_su_admin(self, client, seed_data):
         login_resp = _login(client, 'admin@test.com', 'adminpass1')

@@ -340,3 +340,13 @@ All edited files listed with full path (Rule 17).
     present alongside the legacy dual-emit fields).
   - .github/workflows/test.yml (NEW): first CI for sso.pdhc — pytest on push/PR
     over app/**, Python 3.12.
+
+## 2026-07-03 — Access-model reform D2 (#405): personnummer confinement guard
+- app/tests/test_auth.py — added test_blob_never_leaks_personnummer:
+  asserts the seeded personnummer appears in no key/value of the /api/auth/me
+  blob for professional, patient, or SU-admin, and that no 'personnummer' key
+  exists. Audit result: personnummer is confined to (1) ips PatientIndex
+  identifier_value (correct home) and (2) sso Patient.personnummer (the
+  patient-login identity anchor — cannot be elsewhere). Neither the
+  professional nor the patient access blob emits it (verified). Added json
+  import.
