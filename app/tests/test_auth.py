@@ -233,6 +233,24 @@ class TestMe:
         # The seed adds a direct `planning` grant, hence the assertion.
         assert 'planning' in data['effective_phases']
 
+    def test_me_blob_contract_reform_fields(self, client, seed_data):
+        """S7 (#403) — the access-model reform fields must be present in the
+        professional blob ALONGSIDE the legacy fields (dual-emit, S6 #402).
+        Pins the blob shape so drift is caught."""
+        token = _login(client, 'pro@test.com', 'propass12').get_json()['token']
+        data = client.get('/api/auth/me',
+                          headers=_auth_header(token)).get_json()
+        # New reform fields (shape contract).
+        assert 'affiliations' in data
+        assert isinstance(data['affiliations'], list)
+        assert 'active_affiliation_guid' in data          # None until backfill
+        assert 'session_phases' in data
+        assert isinstance(data['session_phases'], list)
+        # Legacy fields still present during the migration window (dual-emit).
+        assert 'organization_ids' in data
+        assert 'professional_role' in data
+        assert 'effective_phases' in data
+
     def test_me_effective_phases_ignores_group_category(self, client, seed_data, app):
         """#57: a user who is only in a planning-category group but has
         NO UserPhase row must have an empty `effective_phases`. (Field

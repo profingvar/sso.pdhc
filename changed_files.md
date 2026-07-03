@@ -332,3 +332,11 @@ All edited files listed with full path (Rule 17).
     the 3 new tables, seeds roles, backfills affiliations (--dry-run first).
   - app/tests/test_affiliation_model.py (NEW): 30 tests (role registry, Option-C
     intersection, backfill, blob assembly). Full sso suite green, no regressions.
+
+## 2026-07-03 — SSO reform S7 (#403): blob-contract test + first CI
+
+  - app/tests/test_auth.py: added test_me_blob_contract_reform_fields — pins
+    the S6 blob shape (affiliations[], active_affiliation_guid, session_phases
+    present alongside the legacy dual-emit fields).
+  - .github/workflows/test.yml (NEW): first CI for sso.pdhc — pytest on push/PR
+    over app/**, Python 3.12.
