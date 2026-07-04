@@ -369,3 +369,12 @@ All edited files listed with full path (Rule 17).
 - app/tests/test_models.py — EXPECTED_TABLES += roles, research_projects,
   affiliations (reform tables now part of the schema).
 - Full suite: 328/328 pass (was 313 + 15 new).
+
+## 2026-07-04 — Reform deploy runbook
+- docs/deploy_reform_S1-S8_runbook.md — NEW. Operator runbook to ship reform
+  S1-S8 (13adeb4..3c30cac) + ips D1 ALTER to macmini. Key correctness point:
+  build image + run backfill (create tables/seed/backfill) from a throwaway
+  `docker compose run --rm app` container while OLD sso_app still serves, THEN
+  `up -d app` — because active_affiliations has no missing-table guard and prod
+  boot doesn't create_all, so swapping code before the tables exist would 500
+  every professional /api/auth/me and break auth platform-wide.
