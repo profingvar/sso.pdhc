@@ -355,3 +355,92 @@ restarted via /tmp/sso_restart.sh; /api/health 200 with
 `database: connected`.
 
 Pushed to `profingvar/formserviceFHIR` as commit `5065ccb`.
+
+---
+
+# Access-model reform (rollup #396) — progress
+
+The v3-locked reform (2026-07-03, `Paper_sso/Roles for access to patient
+data - v3 … DECISIONS LOCKED.docx`) moves SSO from the flat
+`organization_ids` + `professional_role` blob to an
+`affiliations[]` + zone/role/consent model. Legal correctness (PDL,
+Lag 2022:913, GDPR, EHDS) is the governing priority. Numbering follows
+the S/D/X/M ticket labels, not the older `1.a` scheme.
+
+## Reconcile (prereq) — commit `13adeb4`
+
+Before building the reform, 17 deployed-but-uncommitted SSO files (from
+the #43/#44 era) were reconciled into git — verified sha256-identical
+across local / prod-disk / running container, then committed. Git is now
+authoritative for sso.pdhc (matters for the deploy runbook's pull path).
+
+## S1–S8 — sso.pdhc (all DONE, committed + pushed, NOT yet deployed)
+
+- **S1 (#397)** — commit `8074987`. Formalized CareOrganisation /
+  CareUnit as views on the existing self-referential Organisation table
+  (`parent_caregiver_guid`); added `care_hierarchy` service with a
+  2-level guard + read-only hygiene scan script. Tests: `test_care_hierarchy.py` (17).
+- **S2–S6 (#398–#402)** — commit `63ce3c9`. Role registry (7 seed roles,
+  role→phase matrix), ResearchProject registry, Affiliation binding
+  (person↔care_unit↔role, replaces UserOrganisation), Option-C runtime
+  phase intersection (`granted ∩ (role.permitted ∪ {planning})`), and
+  `build_access_blob` rewritten to emit `affiliations[]`,
+  `active_affiliation_guid`, `session_phases` **alongside every legacy
+  field (dual-emit)**. Backfill script + `test_affiliation_model.py` (30).
+- **S7 (#403)** — commit `e935054`. Blob-contract test pinning the
+  dual-emit shape; first SSO CI (`.github/workflows/test.yml`).
+- **S8 (#410)** — commit `3c30cac`. SU-only registry management:
+  `/api/registry` blueprint (Role + ResearchProject CRUD, SU-only writes,
+  reads open to any professional; CareOrg/CareUnit read projections) +
+  `validate_care_hierarchy` wired into the SU-only org create/edit path.
+  `test_registry.py` (15). Affiliation assignment stays SU-only.
+- **D2 (#405)** — commit `98d4e05`. Personnummer confinement guard:
+  audit confirmed pnr lives only in ips PatientIndex.identifier_value +
+  the sso patient-login anchor; the access blob emits it for no user
+  type. Regression guard `test_blob_never_leaks_personnummer`.
+
+**Test results:** whole sso suite **328 / 328 pass** (was 313 + 15 S8).
+`EXPECTED_TABLES` updated for the 3 reform tables (roles,
+research_projects, affiliations).
+
+## Cross-repo reform work
+
+- **D1 (#404)** — ips.pdhc commit `fccb302`. Added `ehds_opt_out`,
+  `quality_registry_opt_out`, `consented_research_projects` (JSONB) to
+  `PatientIndex` + `primary_care_unit_guids()` helper. Reconciled: the
+  other two v3 consents already exist richer — `allow_sharing_in_care` →
+  `PatientConsent` (#198), care-units → `PatientClinicAssignment`.
+  Idempotent ALTER migration for prod. +3 tests (17/17).
+- **X1 (#407)** — canonical access-log tuple + `purpose`/`access_basis`
+  closed enums locked in `plans/pdhc_data_shapes.md §5` + wire-alias
+  inventory. Per-service adoption rides M0.
+- **X2 (#408)** — gateway.pdhc commit `29b0e13`. Reference implementation
+  of universal `X-Operator-Session-Id` propagation: reusable
+  `outbound_session_headers()` helper on all synchronous onward calls +
+  operator-session capture at ingest / replay on the async cdr1 forwarder
+  (chain-of-custody across the queue gap). `session_id` = JWT `sid`
+  (#191), already live → **no deploy dependency**. +7 tests. #408 left
+  open (cross-cutting); per-repo adoption tracked in continuation **#423**.
+- **M0 (#409)** — consumer-migration tracker scaffolded: 11 Wave-3 sub-
+  tickets **#412–#422** created (all BLOCKED until reform deploy), ticked
+  into `Paper_sso/repos_to_reform.md`. #409 left open as umbrella.
+
+## Deploy status — NOT YET DEPLOYED
+
+S1–S8 (`13adeb4..3c30cac`) are green + pushed but **not live on the
+macmini**. Runbook: `docs/deploy_reform_S1-S8_runbook.md`. Critical
+ordering: build image → run backfill from a throwaway `docker compose
+run --rm app` container (creates the 3 tables + seeds roles + backfills
+affiliations) **while old code still serves** → then swap. Reason:
+`affiliation_service.active_affiliations` has no missing-table guard and
+prod boot does not run `create_all`, so serving new code before the
+tables exist would 500 every professional `/api/auth/me` and break auth
+platform-wide. Deploying unblocks X2's per-repo adoption and all of M0.
+
+## Known follow-ups
+
+- Deferred: **D3 (#406)** spärr inre/yttre reconcile (blocked on ips-team
+  confirmation); **S9 (#411)** guided sign-on UI.
+- gateway.pdhc has 10 **pre-existing** broken tests (auth-fixture drift +
+  one stale contract-scope test + a test-isolation state-leak) — filed as
+  cleanup **#424**, unrelated to the reform.
