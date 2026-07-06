@@ -425,10 +425,28 @@ research_projects, affiliations).
   tickets **#412–#422** created (all BLOCKED until reform deploy), ticked
   into `Paper_sso/repos_to_reform.md`. #409 left open as umbrella.
 
-## Deploy status — NOT YET DEPLOYED
+## Deploy status — DEPLOYED 2026-07-06
 
-S1–S8 (`13adeb4..3c30cac`) are green + pushed but **not live on the
-macmini**. Runbook: `docs/deploy_reform_S1-S8_runbook.md`. Critical
+S1–S8 went **live on the macmini 2026-07-06** (image `sha256:8f8587c6…`,
+rollback target `sha256:9314e021…`). Followed the runbook: backups
+(`~/backups/predeploy/sso.pdhc/…2026-07-05T14-26-24Z`), sha-verified prod
+source matched baseline `13adeb4` (5/5 modified src files identical; only
+stale test files differed), shipped reform src by tar (prod dir is NOT a
+git checkout), built new image via `docker-compose` v1 (v2 plugin absent),
+ran backfill from a throwaway `docker-compose run --rm app` container
+**before** swapping (avoided the missing-table 500 window), then
+`up -d app`. Backfill: **7 roles · 9 affiliations · 0 flagged**. Care
+hierarchy: 7 vårdgivare · 1 vårdenhet · 0 violations. Post-swap: health
+200, clean boot, `/api/registry/*` → 401 (wired), all 10 SSO-dependent
+services 200.
+
+Two `init_db()` bugs fixed mid-deploy (backfill + verify_care_hierarchy
+scripts called `init_db()` bare; now source `DATABASE_URL` from env) —
+commits pushed. ips D1 ALTER applied to `ips-db-1` (3 columns). ips **app**
+redeploy DEFERRED — it predates D1 code (`fccb302`); harmless (old ORM
+ignores the columns), rides the first D1-consumer work.
+
+Prior status (kept for history): S1–S8 (`13adeb4..3c30cac`) green + pushed. Runbook: `docs/deploy_reform_S1-S8_runbook.md`. Critical
 ordering: build image → run backfill from a throwaway `docker compose
 run --rm app` container (creates the 3 tables + seeds roles + backfills
 affiliations) **while old code still serves** → then swap. Reason:
