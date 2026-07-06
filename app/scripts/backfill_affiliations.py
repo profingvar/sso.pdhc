@@ -37,7 +37,13 @@ def main():
                     help='Report what would be created without committing.')
     args = ap.parse_args()
 
-    init_db()
+    database_url = os.environ.get('DATABASE_URL', '')
+    if not database_url:
+        print('ERROR: DATABASE_URL not set in the environment. Run this inside '
+              'the app container (docker-compose run --rm app ...) so the '
+              'compose DATABASE_URL is present.', file=sys.stderr)
+        return 1
+    init_db(database_url)
     # Idempotent: creates the 3 new reform tables if missing, leaves the rest.
     create_all_tables()
     session = get_session()
