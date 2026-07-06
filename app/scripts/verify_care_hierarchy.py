@@ -27,7 +27,12 @@ from src.services import care_hierarchy as ch     # noqa: E402
 
 
 def main():
-    init_db()
+    database_url = os.environ.get('DATABASE_URL', '')
+    if not database_url:
+        print('ERROR: DATABASE_URL not set. Run inside the app container '
+              '(docker-compose run --rm app ...).', file=sys.stderr)
+        return 1
+    init_db(database_url)
     session = get_session()
     orgs = ch.list_care_organisations(session)
     units = ch.list_care_units(session)
