@@ -421,9 +421,11 @@ research_projects, affiliations).
   (chain-of-custody across the queue gap). `session_id` = JWT `sid`
   (#191), already live → **no deploy dependency**. +7 tests. #408 left
   open (cross-cutting); per-repo adoption tracked in continuation **#423**.
-- **M0 (#409)** — consumer-migration tracker scaffolded: 11 Wave-3 sub-
-  tickets **#412–#422** created (all BLOCKED until reform deploy), ticked
-  into `Paper_sso/repos_to_reform.md`. #409 left open as umbrella.
+- **M0 (#409)** — consumer-migration tracker: 11 Wave-3 sub-tickets
+  **#412–#422** created, ticked into `Paper_sso/repos_to_reform.md`.
+  Consumer CODE all committed + green; **the 7-service consumer DEPLOY
+  campaign (#428–#434) is now COMPLETE — see "Deploy status — M0 consumer
+  campaign" below.** #409 umbrella + #422 (per-reader wiring) stay open.
 
 ## Deploy status — DEPLOYED 2026-07-06
 
@@ -455,10 +457,57 @@ prod boot does not run `create_all`, so serving new code before the
 tables exist would 500 every professional `/api/auth/me` and break auth
 platform-wide. Deploying unblocks X2's per-repo adoption and all of M0.
 
+## Deploy status — M0 consumer campaign DEPLOYED 2026-07-07
+
+All **7 consumer-reform deploys live on the macmini 2026-07-07** (campaign
+tickets #428–#434, worked one-by-one, low-blast-first). Every service
+stayed healthy throughout; no data loss (SoT cdr1 7063, ips patients 146,
+dashboard 7019 all intact); final platform sweep all services 200.
+
+| # | Service | Ticket | Image | Method | Migration |
+|---|---------|--------|-------|--------|-----------|
+| 1 | rosetta | #428/#417 | `89765f4b` | new release, git app overlay | +1 benign catch-up `b7f2a1c3d901` (measurement_source_url) |
+| 2 | plan | #429/#421 | `4b11d124` | `git ff-merge` origin/main | none |
+| 3 | dashboard | #430 (#415 zone part) | `8bb94c8c` | release overlay (+pruned 2 dead dupes) | none |
+| 4 | cdr1 | #431/#416 | `1f9a1b27` | surgical 2-file (SoT, 7063 rows) | none |
+| 5 | request | #432/#419 | `1c2a364d` | `git ff-merge` full catch-up (app+worker) | none |
+| 6 | ips | #433/#404 | `cf5b3271` | surgical 3-file (PII service) | none (D1 cols pre-ALTERed) |
+| 7 | gateway | #434/#418 | `9ac562bc` | surgical + migration (ingest boundary) | `e9f0a1b2c3d4` operator_session_id |
+
+**Every prod dir was behind git in a different way** (release-symlink /
+flat dir / git-checkout / stale-HEAD partial deploy) — none matched the
+ticket's naive "code only, no migration" assumption, so each got a full
+divergence audit (container-vs-git manifest + novelty scan) before any
+mutation. Notable:
+- **rosetta** — prod predated the repo; catch-up applied one benign
+  additive migration the container had never received.
+- **request** — a `git ff-merge` also shipped merged-but-undeployed
+  **FHIR R5 conformance** fixes (#377/#381); `/api/v1/metadata` now emits
+  `fhirVersion 5.0.0`. Resolved the long-standing "request runs behind".
+- **ips** — prod incoherently diverged; a blanket catch-up would have
+  activated spärr patient-facing copy still **pending legal sign-off**, so
+  deployed the surgical D1+#422 scope only.
+- **gateway** — proved all 31 "modified" working-tree files were
+  non-novel (matched real commits) before touching the ingest boundary;
+  ran the migration from a throwaway container **before** swapping;
+  forwarder verified against the new `operator_session_id` column.
+
+Backups (rollback image tags + source tars + gateway full DB dump) in
+`~/backups/predeploy/<service>/` on miserver.
+
 ## Known follow-ups
 
+- **Reform tails still open:** **#422** per-reader consent wiring
+  (rosetta/cdr2–6/analyse call ips `analysis-filter`); **#408/#423**
+  per-repo X2 `X-Operator-Session-Id` adoption; **#415** dashboard
+  roles-hack removal + EHDS/consent joins (only the zone-swap shipped).
+- **Deploy-surfaced cleanups (2026-07-07, non-blocking):** **#435**
+  dashboard `test_auth` SSO-revalidation mock; **#436** cdr1 hygiene
+  (prune 3 dead analyse-split files + 17 pre-existing `test_fhir_read`
+  fails); **#437** ips full git reconcile (**needs legal sign-off on
+  spärr copy first**); **#438** gateway git-HEAD reconcile (stale label
+  over a proven-non-novel partial deploy).
 - Deferred: **D3 (#406)** spärr inre/yttre reconcile (blocked on ips-team
   confirmation); **S9 (#411)** guided sign-on UI.
-- gateway.pdhc has 10 **pre-existing** broken tests (auth-fixture drift +
-  one stale contract-scope test + a test-isolation state-leak) — filed as
-  cleanup **#424**, unrelated to the reform.
+- **#424** (gateway's 10 pre-existing broken tests) — **RESOLVED** during
+  gateway deploy prep; suite now green, fixes rode along in #434.
