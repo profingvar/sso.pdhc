@@ -421,6 +421,15 @@ research_projects, affiliations).
   (chain-of-custody across the queue gap). `session_id` = JWT `sid`
   (#191), already live → **no deploy dependency**. +7 tests. #408 left
   open (cross-cutting); per-repo adoption tracked in continuation **#423**.
+  **2026-07-08: #408 CLOSED.** Per-repo adoption (#423) deployed to all 7
+  repos on miserver (cdr migration `e3f4a5b6c7d8` applied; rollback tags
+  `<image>:pre_x2`). Prod e2e passed: one sid (`e2e-x2-408-20260708`)
+  captured at gateway ingest → replayed on the real forwarder HTTP hop
+  (visible in cdr `ingest_raw.headers_json`) → carried on both cdr
+  `cambio_delivery_log` rows. Cambio external hop config-disabled; worker
+  replay unit-proven. Side finds: contract prod git reconciled to origin
+  (`ccc7f44`, incl. revert of #350's broken in-container 127.0.0.1 bind);
+  cdr prod git-ified at `b66c392`; gateway→cdr dev service key → **#440**.
 - **M0 (#409)** — consumer-migration tracker: 11 Wave-3 sub-tickets
   **#412–#422** created, ticked into `Paper_sso/repos_to_reform.md`.
   Consumer CODE all committed + green; **the 7-service consumer DEPLOY
