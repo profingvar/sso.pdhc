@@ -430,6 +430,14 @@ research_projects, affiliations).
   replay unit-proven. Side finds: contract prod git reconciled to origin
   (`ccc7f44`, incl. revert of #350's broken in-container 127.0.0.1 bind);
   cdr prod git-ified at `b66c392`; gateway→cdr dev service key → **#440**.
+- **S9 (#411)** — **DONE + DEPLOYED 2026-07-09** (commit `82d0e1e`, migration
+  `add_user_status.sql` applied, rollback `sso-app:pre_s9`). Guided
+  professional sign-on: access-request approval now creates a PENDING
+  person (User.status) with a NO-ACCESS blob (`activation_pending`);
+  SU-only affiliation CRUD + server-side completeness
+  (`activation_service.py`) gate activation (409 + missing list);
+  guided panel in su_admin.html renders the server-computed checklist.
+  +9 tests, full suite 323/323.
 - **M0 (#409)** — consumer-migration tracker: 11 Wave-3 sub-tickets
   **#412–#422** created, ticked into `Paper_sso/repos_to_reform.md`.
   Consumer CODE all committed + green; **the 7-service consumer DEPLOY
