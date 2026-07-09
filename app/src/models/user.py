@@ -17,6 +17,15 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     user_type = Column(Enum('patient', 'professional', name='user_type_enum'), nullable=False)
     is_su_admin = Column(Boolean, nullable=False, default=False)
+    # S9 (#411): activation gate. Professionals created from an approved
+    # sign-on request start 'pending' — zero access until an SU has assigned
+    # >=1 affiliation + useful phase grants and explicitly activated
+    # (server-side completeness check, activation_service). Patients and
+    # pre-S9 rows are 'active' (migration default). Replaces the after-the-
+    # fact organisation_warning blob flag with an up-front gate.
+    status = Column(Enum('active', 'pending', 'suspended',
+                         name='user_status_enum'),
+                    nullable=False, default='active', server_default='active')
     # Ticket #43: SU-triggered password reset flow.
     # force_change_on_next_login is set to True when an SU resets the user's
     # password; /api/auth/change-password clears it. Login includes the flag

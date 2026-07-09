@@ -164,6 +164,45 @@
     </div>
 </div>
 
+<!-- S9 (#411): Guided activation — SU assigns affiliations, server enforces completeness -->
+<div class="card">
+    <h3>Activation &amp; Affiliations (S9)</h3>
+    <p style="font-size:0.8rem;color:var(--text-muted,#6b7280);margin:0 0 0.5rem;">
+        The person requests sign-on; the SU assigns. A professional cannot be
+        activated until the profile is complete (&ge;1 affiliation with CareUnit +
+        Role, phases the role can use, projects on researcher affiliations) —
+        the checks below are computed server-side.
+    </p>
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <select id="s9-user" style="font-size:0.8rem;max-width:280px;">
+            <option value="">Select professional…</option>
+            {% for u in users %}{% if u.user_type == 'professional' %}
+            <option value="{{ u.user_guid }}">{{ u.email }} ({{ u.first_name or '' }} {{ u.last_name or '' }})</option>
+            {% endif %}{% endfor %}
+        </select>
+        <button class="btn btn-sm btn-secondary" onclick="s9Load()">Load</button>
+    </div>
+    <div id="s9-panel" style="display:none;margin-top:0.75rem;">
+        <div id="s9-checklist" class="mb-1"></div>
+        <table>
+            <thead><tr><th>Care unit</th><th>Role</th><th>Projects</th><th></th></tr></thead>
+            <tbody id="s9-affs"></tbody>
+        </table>
+        <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem;">
+            <select id="s9-unit" style="font-size:0.75rem;max-width:200px;">
+                {% for o in organisations %}<option value="{{ o.organisation_guid }}">{{ o.name }}</option>{% endfor %}
+            </select>
+            <select id="s9-role" style="font-size:0.75rem;"></select>
+            <select id="s9-projects" multiple size="2" style="font-size:0.75rem;display:none;max-width:200px;" title="Research projects (researcher only)"></select>
+            <button class="btn btn-sm btn-primary" onclick="s9AddAffiliation()">Assign affiliation</button>
+            <span style="flex:1"></span>
+            <button class="btn btn-sm" id="s9-activate" onclick="s9Activate()" style="background:#16a34a;color:#fff;">Activate</button>
+            <button class="btn btn-sm btn-secondary" onclick="s9Deactivate()">Deactivate</button>
+        </div>
+        <div id="s9-msg" style="font-size:0.75rem;margin-top:0.35rem;"></div>
+    </div>
+</div>
+
 <!-- Organisations -->
 <div class="card">
     <h3>Organisations</h3>
@@ -805,6 +844,106 @@
             window._kmLoadUsers();
         })
         .catch(function() { showErr('Request failed.'); });
+    };
+})();
+</script>
+
+<script>
+// S9 (#411) — guided activation panel. Renders the SERVER-computed
+// completeness checklist; the UI never decides completeness itself.
+(function() {
+    const MISSING_TEXT = {
+        no_active_affiliation: 'No active affiliation — assign at least one (CareUnit + Role).',
+        no_useful_phase_grant: 'No phase grant the held role(s) can use — grant a phase via the Person Registry.',
+        researcher_affiliation_missing_projects: 'A researcher affiliation lacks research projects.',
+    };
+    let ROLES = [], PROJECTS = [];
+
+    function hdrs() {
+        const token = window.SSO_TOKEN || (typeof getCookie === 'function' && getCookie('sso_token'));
+        return token ? {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
+                     : {'Content-Type': 'application/json'};
+    }
+    const el = id => document.getElementById(id);
+    const guid = () => el('s9-user').value;
+    const msg = (t, bad) => { el('s9-msg').textContent = t;
+                             el('s9-msg').style.color = bad ? '#dc2626' : '#16a34a'; };
+
+    async function loadRegistries() {
+        if (ROLES.length) return;
+        const [r1, r2] = await Promise.all([
+            fetch('/api/registry/roles', {headers: hdrs()}),
+            fetch('/api/registry/research-projects', {headers: hdrs()}),
+        ]);
+        ROLES = r1.ok ? await r1.json() : [];       // plain array (registry.py)
+        PROJECTS = r2.ok ? await r2.json() : [];    // plain array
+        el('s9-role').innerHTML = ROLES.map(r =>
+            `<option value="${r.guid}" data-code="${r.code}">${r.display_name || r.code}</option>`).join('');
+        el('s9-projects').innerHTML = PROJECTS.map(p =>
+            `<option value="${p.guid}">${p.name}</option>`).join('');
+        el('s9-role').onchange = () => {
+            const code = el('s9-role').selectedOptions[0]?.dataset.code;
+            el('s9-projects').style.display = code === 'researcher' ? '' : 'none';
+        };
+        el('s9-role').onchange();
+    }
+
+    window.s9Load = async function() {
+        if (!guid()) return;
+        await loadRegistries();
+        const r = await fetch(`/api/admin/users/${guid()}/affiliations`, {headers: hdrs()});
+        if (!r.ok) { msg('Load failed (' + r.status + ')', true); return; }
+        const data = await r.json();
+        el('s9-panel').style.display = '';
+        const c = data.completeness;
+        el('s9-checklist').innerHTML =
+            `<span style="font-weight:600;font-size:0.8rem;">Status: ${c.status}</span> ` +
+            (c.complete
+                ? '<span style="color:#16a34a;font-size:0.8rem;">✔ profile complete — activation possible</span>'
+                : c.missing.map(m =>
+                    `<div style="color:#d97706;font-size:0.78rem;">✘ ${MISSING_TEXT[m] || m}</div>`).join(''));
+        el('s9-affs').innerHTML = (data.affiliations || []).map(a => `<tr>
+            <td style="font-size:0.78rem;">${a.care_unit_name || a.care_unit_guid}</td>
+            <td style="font-size:0.78rem;">${a.role}</td>
+            <td style="font-size:0.78rem;">${(a.research_project_guids || []).length || '-'}</td>
+            <td><button class="btn btn-sm btn-secondary"
+                onclick="s9DeleteAffiliation('${a.affiliation_guid}')">remove</button></td></tr>`).join('')
+            || '<tr><td colspan="4" style="font-size:0.78rem;color:#6b7280;">none</td></tr>';
+        msg('');
+    };
+
+    window.s9AddAffiliation = async function() {
+        const code = el('s9-role').selectedOptions[0]?.dataset.code;
+        const body = {care_unit_guid: el('s9-unit').value, role_guid: el('s9-role').value};
+        if (code === 'researcher')
+            body.research_project_guids = [...el('s9-projects').selectedOptions].map(o => o.value);
+        const r = await fetch(`/api/admin/users/${guid()}/affiliations`,
+                              {method: 'POST', headers: hdrs(), body: JSON.stringify(body)});
+        const d = await r.json();
+        msg(r.ok ? 'Affiliation assigned.' : (d.message || 'failed'), !r.ok);
+        if (r.ok) s9Load();
+    };
+
+    window.s9DeleteAffiliation = async function(affGuid) {
+        const r = await fetch(`/api/admin/users/${guid()}/affiliations/${affGuid}`,
+                              {method: 'DELETE', headers: hdrs()});
+        msg(r.ok ? 'Removed.' : 'Remove failed.', !r.ok);
+        if (r.ok) s9Load();
+    };
+
+    window.s9Activate = async function() {
+        const r = await fetch(`/api/admin/users/${guid()}/activate`,
+                              {method: 'POST', headers: hdrs()});
+        const d = await r.json();
+        msg(r.ok ? 'Activated.' : (d.message || 'activation blocked'), !r.ok);
+        s9Load();
+    };
+
+    window.s9Deactivate = async function() {
+        const r = await fetch(`/api/admin/users/${guid()}/deactivate`,
+                              {method: 'POST', headers: hdrs()});
+        msg(r.ok ? 'Deactivated (pending).' : 'failed', !r.ok);
+        s9Load();
     };
 })();
 </script>

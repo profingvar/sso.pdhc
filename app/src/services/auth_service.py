@@ -81,6 +81,26 @@ def build_access_blob(user, session, session_id=None):
             blob['professional_role'] = professional.professional_role
             blob['fhir_resource_type'] = Professional.FHIR_RESOURCE_TYPE
 
+        # S9 (#411) activation gate: an unactivated professional gets a
+        # NO-ACCESS blob — identity only, every scope/phase field empty —
+        # so every consumer's existing phase/org gate denies without any
+        # consumer-side change. Replaces the after-the-fact
+        # organisation_warning flag (kept dual-emitted below for
+        # un-migrated consumers until M0 #409 cleanup).
+        from src.services.activation_service import is_activated
+        if not is_activated(user):
+            blob['activation_pending'] = True
+            blob['organization_ids'] = []
+            blob['organisation_warning'] = True
+            blob['organization_caregivers'] = {}
+            blob['groups'] = []
+            blob['effective_phases'] = []
+            blob['affiliations'] = []
+            blob['active_affiliation_guid'] = None
+            blob['session_phases'] = []
+            return blob
+        blob['activation_pending'] = False
+
         # Organisation IDs (many-to-many)
         user_orgs = session.query(UserOrganisation).filter_by(user_guid=user.guid).all()
         blob['organization_ids'] = [uo.organisation_guid for uo in user_orgs]

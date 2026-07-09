@@ -697,6 +697,12 @@ def decide_access_request():
             password_hash=ar.password_hash,
             user_type='professional',
             is_su_admin=False,
+            # S9 (#411): approval creates a PENDING person with zero access.
+            # The SU then assigns >=1 affiliation + phases and activates via
+            # POST /users/<guid>/activate (completeness-enforced). The
+            # request's organisation_guid / professional_role remain the
+            # non-authoritative HINT the guided UI prefills from.
+            status='pending',
         )
         session.add(user)
         session.flush()
@@ -732,6 +738,13 @@ def decide_access_request():
         # Surface the advisory phases to the UI so the SU can one-click
         # grant them immediately after approval (#57).
         "requested_phases_pending_su_grant": list(ar.requested_phases or []),
+        # S9 (#411): the created user is PENDING until the SU completes the
+        # guided assignment (affiliation + phases) and activates. The
+        # request's org/role are surfaced as the prefill hint.
+        "activation_pending": decision == 'approved',
+        "hint": ({"care_unit_guid": ar.organisation_guid,
+                  "professional_role": ar.professional_role}
+                 if decision == 'approved' else None),
     }), 200
 
 
@@ -1233,3 +1246,220 @@ def update_oath_overview():
           detail={'rows': len(data)}, ip=request.remote_addr)
 
     return jsonify({"message": "Oath overview updated", "rows": len(data)}), 200
+
+
+# --- S9 (#411): SU-only affiliation assignment + guided activation ---
+#
+# The person triggers (public access-request); the SU assigns. Only SU
+# may create/remove Affiliation rows (non-SU -> 403 via @require_su).
+# Activation is blocked server-side while the profile is incomplete —
+# the guided UI renders the same `missing` list the API computes.
+
+
+@admin_bp.route('/users/<user_guid>/affiliations', methods=['GET'])
+@require_auth
+@require_su
+def list_user_affiliations(user_guid):
+    """GET /api/admin/users/<guid>/affiliations — with names for the UI."""
+    session = get_db()
+    from src.models.user import User
+    from src.services.affiliation_service import build_affiliations_for_blob
+    from src.services.activation_service import completeness
+
+    user = session.query(User).filter_by(guid=user_guid).first()
+    if user is None:
+        return jsonify({"error": "not_found", "message": "User not found"}), 404
+    return jsonify({
+        "user_guid": user_guid,
+        "affiliations": build_affiliations_for_blob(session, user_guid),
+        "completeness": completeness(session, user),
+    }), 200
+
+
+@admin_bp.route('/users/<user_guid>/affiliations', methods=['POST'])
+@require_auth
+@require_su
+def create_user_affiliation(user_guid):
+    """POST /api/admin/users/<guid>/affiliations — SU assigns (CareUnit + Role).
+
+    Body: {care_unit_guid, role_guid, research_project_guids?, is_admin?}.
+    Validations (server-side, S9):
+      - user exists and is a professional
+      - care_unit_guid is an existing INTERNAL organisation
+      - role_guid exists in the role registry (#398)
+      - role=researcher requires >=1 research_project_guid, each present
+        in the ResearchProject registry (#400); other roles must not
+        carry project guids
+      - (person, unit, role) unique -> 409 on duplicate
+    """
+    session = get_db()
+    caller = g.current_user
+    from src.models.user import User
+    from src.models.organisation import Organisation
+    from src.models.role import Role
+    from src.models.research_project import ResearchProject
+    from src.models.affiliation import Affiliation
+
+    user = session.query(User).filter_by(guid=user_guid).first()
+    if user is None:
+        return jsonify({"error": "not_found", "message": "User not found"}), 404
+    if user.user_type != 'professional':
+        return jsonify({"error": "invalid_request",
+                        "message": "Affiliations apply to professionals only"}), 400
+
+    data = request.get_json(silent=True) or {}
+    care_unit_guid = (data.get('care_unit_guid') or '').strip()
+    role_guid = (data.get('role_guid') or '').strip()
+    project_guids = list(data.get('research_project_guids') or [])
+    is_admin = bool(data.get('is_admin', False))
+
+    if not care_unit_guid or not role_guid:
+        return jsonify({"error": "invalid_request",
+                        "message": "care_unit_guid and role_guid required"}), 400
+
+    unit = session.query(Organisation).filter_by(guid=care_unit_guid).first()
+    if unit is None or unit.is_external:
+        return jsonify({"error": "invalid_request",
+                        "message": "care_unit_guid must be an internal organisation"}), 400
+
+    role = session.query(Role).filter_by(guid=role_guid).first()
+    if role is None:
+        return jsonify({"error": "invalid_request",
+                        "message": "role_guid not in the role registry"}), 400
+
+    if role.code == 'researcher':
+        if not project_guids:
+            return jsonify({"error": "invalid_request",
+                            "message": "researcher affiliation requires >=1 "
+                                       "research_project_guid (ResDB #400)"}), 400
+        known = {p.guid for p in session.query(ResearchProject).filter(
+            ResearchProject.guid.in_(project_guids)).all()}
+        unknown = [p for p in project_guids if p not in known]
+        if unknown:
+            return jsonify({"error": "invalid_request",
+                            "message": f"unknown research projects: {unknown}"}), 400
+    elif project_guids:
+        return jsonify({"error": "invalid_request",
+                        "message": "research_project_guids only valid for "
+                                   "role=researcher"}), 400
+
+    dup = session.query(Affiliation).filter_by(
+        person_guid=user_guid, care_unit_guid=care_unit_guid,
+        role_guid=role_guid).first()
+    if dup is not None:
+        return jsonify({"error": "conflict",
+                        "message": "affiliation already exists",
+                        "affiliation_guid": dup.guid}), 409
+
+    aff = Affiliation(
+        person_guid=user_guid, care_unit_guid=care_unit_guid,
+        role_guid=role_guid,
+        research_project_guids=project_guids or None,
+        is_admin=is_admin, status='active',
+    )
+    session.add(aff)
+    session.flush()
+
+    audit('affiliation_create', user_guid=caller.guid,
+          detail={'person_guid': user_guid, 'affiliation_guid': aff.guid,
+                  'care_unit_guid': care_unit_guid, 'role': role.code,
+                  'research_project_guids': project_guids},
+          ip=request.remote_addr)
+
+    from src.services.activation_service import completeness
+    return jsonify({
+        "affiliation_guid": aff.guid,
+        "completeness": completeness(session, user),
+    }), 201
+
+
+@admin_bp.route('/users/<user_guid>/affiliations/<affiliation_guid>',
+                methods=['DELETE'])
+@require_auth
+@require_su
+def delete_user_affiliation(user_guid, affiliation_guid):
+    """DELETE — remove one affiliation. If it was the person's last one
+    and they are active, they stay active (grandfathered) but the
+    completeness endpoint flags the gap; suspension is a separate call."""
+    session = get_db()
+    caller = g.current_user
+    from src.models.affiliation import Affiliation
+
+    aff = session.query(Affiliation).filter_by(
+        guid=affiliation_guid, person_guid=user_guid).first()
+    if aff is None:
+        return jsonify({"error": "not_found",
+                        "message": "Affiliation not found"}), 404
+    session.delete(aff)
+    audit('affiliation_delete', user_guid=caller.guid,
+          detail={'person_guid': user_guid,
+                  'affiliation_guid': affiliation_guid},
+          ip=request.remote_addr)
+    return jsonify({"deleted": affiliation_guid}), 200
+
+
+@admin_bp.route('/users/<user_guid>/completeness', methods=['GET'])
+@require_auth
+@require_su
+def user_completeness(user_guid):
+    """GET — the guided-form checklist (server-computed, S9)."""
+    session = get_db()
+    from src.models.user import User
+    from src.services.activation_service import completeness
+
+    user = session.query(User).filter_by(guid=user_guid).first()
+    if user is None:
+        return jsonify({"error": "not_found", "message": "User not found"}), 404
+    return jsonify({"user_guid": user_guid,
+                    **completeness(session, user)}), 200
+
+
+@admin_bp.route('/users/<user_guid>/activate', methods=['POST'])
+@require_auth
+@require_su
+def activate_user(user_guid):
+    """POST — activate a pending professional. 409 + the missing list
+    while the profile is incomplete (server-enforced; the UI cannot
+    bypass this by hiding fields)."""
+    session = get_db()
+    caller = g.current_user
+    from src.models.user import User
+    from src.services.activation_service import completeness
+
+    user = session.query(User).filter_by(guid=user_guid).first()
+    if user is None:
+        return jsonify({"error": "not_found", "message": "User not found"}), 404
+
+    check = completeness(session, user)
+    if not check['complete']:
+        return jsonify({"error": "incomplete_profile",
+                        "message": "activation blocked — profile incomplete",
+                        **check}), 409
+
+    user.status = 'active'
+    audit('user_activate', user_guid=caller.guid,
+          detail={'person_guid': user_guid}, ip=request.remote_addr)
+    return jsonify({"user_guid": user_guid, "status": "active",
+                    **check}), 200
+
+
+@admin_bp.route('/users/<user_guid>/deactivate', methods=['POST'])
+@require_auth
+@require_su
+def deactivate_user(user_guid):
+    """POST — set a professional back to pending (access revoked on the
+    next blob build; pair with flush-sessions for immediate effect)."""
+    session = get_db()
+    caller = g.current_user
+    from src.models.user import User
+
+    user = session.query(User).filter_by(guid=user_guid).first()
+    if user is None:
+        return jsonify({"error": "not_found", "message": "User not found"}), 404
+    if user.is_su_admin:
+        return jsonify({"error": "invalid_request",
+                        "message": "cannot deactivate an SU admin"}), 400
+    user.status = 'pending'
+    audit('user_deactivate', user_guid=caller.guid,
+          detail={'person_guid': user_guid}, ip=request.remote_addr)
+    return jsonify({"user_guid": user_guid, "status": "pending"}), 200
