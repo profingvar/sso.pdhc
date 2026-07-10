@@ -1,5 +1,6 @@
 """Auth service — login, password verification, access blob assembly."""
 import bcrypt
+import os
 
 from src.db import get_db
 from src.models.user import User
@@ -34,6 +35,30 @@ def authenticate_user(email, password, session):
     if not verify_password(password, user.password_hash):
         return None
     return user
+
+
+# M0 #409 (the old #196 final act): the pre-reform blob fields, dual-emitted
+# since S6 so un-migrated consumers kept working. Every consumer now reads
+# the reform fields first (survey re-verified 2026-07-10; the last hard
+# readers — contract JWT claims, request map_role/organisation_warning —
+# were fixed the same day). Flip SSO_EMIT_LEGACY_BLOB_FIELDS=false after a
+# soak period to stop emitting them; flip back to re-emit instantly.
+LEGACY_BLOB_FIELDS = (
+    'organization_ids', 'organisation_warning', 'organization_caregivers',
+    'professional_role', 'groups', 'effective_phases',
+)
+
+
+def _emit_legacy_fields() -> bool:
+    return os.environ.get(
+        'SSO_EMIT_LEGACY_BLOB_FIELDS', 'true').lower() in ('1', 'true', 'yes')
+
+
+def _finalize_blob(blob):
+    if blob.get('user_type') == 'professional' and not _emit_legacy_fields():
+        for key in LEGACY_BLOB_FIELDS:
+            blob.pop(key, None)
+    return blob
 
 
 def build_access_blob(user, session, session_id=None):
@@ -98,7 +123,7 @@ def build_access_blob(user, session, session_id=None):
             blob['affiliations'] = []
             blob['active_affiliation_guid'] = None
             blob['session_phases'] = []
-            return blob
+            return _finalize_blob(blob)
         blob['activation_pending'] = False
 
         # Organisation IDs (many-to-many)
@@ -196,4 +221,4 @@ def build_access_blob(user, session, session_id=None):
         blob['session_phases'] = resolve_session_phases(
             effective_phases, active_role)
 
-    return blob
+    return _finalize_blob(blob)
