@@ -395,13 +395,27 @@ def admin_page():
                 entry['personnummer'] = pat.personnummer or ''
         users.append(entry)
 
-    # Organisations — with dependent counts for the ticket #45 Delete modal.
+    # Organisations — with dependent counts for the ticket #45 Delete modal,
+    # plus S8 (#410) care-hierarchy fields: kind (vårdgivare / vårdenhet /
+    # external) and the parent caregiver's name, so the panel can surface and
+    # edit the hierarchy the affiliation model depends on.
     orgs = db.query(Organisation).all()
+    _org_name = {o.guid: o.name for o in orgs}
     organisations = []
     for o in orgs:
+        if o.is_external:
+            kind = 'external'
+        elif o.parent_caregiver_guid:
+            kind = 'care_unit'
+        else:
+            kind = 'care_organisation'
         organisations.append({
             'organisation_guid': o.guid,
             'name': o.name,
+            'is_external': o.is_external,
+            'kind': kind,
+            'parent_caregiver_guid': o.parent_caregiver_guid,
+            'parent_caregiver_name': _org_name.get(o.parent_caregiver_guid),
             'patient_count': db.query(Patient).filter_by(organisation_guid=o.guid).count(),
             'user_assignment_count': db.query(UserOrganisation).filter_by(
                 organisation_guid=o.guid).count(),
@@ -763,12 +777,66 @@ def admin_create_org():
         flash('Organisation name already exists.', 'error')
         return redirect(url_for('frontend.admin_page'))
 
+    # S8 (#410): an optional parent caregiver makes this a vårdenhet (CareUnit)
+    # under that vårdgivare. Validate the 2-level hierarchy before committing.
+    parent_guid = (request.form.get('parent_caregiver_guid') or '').strip() or None
+
     org = Organisation(name=name)
+    if parent_guid:
+        org.parent_caregiver_guid = parent_guid
     db.add(org)
     db.flush()
+
+    from src.services.care_hierarchy import validate_care_hierarchy, HierarchyError
+    try:
+        validate_care_hierarchy(db, org)
+    except HierarchyError as e:
+        db.rollback()
+        flash(f'Invalid care hierarchy: {e}', 'error')
+        return redirect(url_for('frontend.admin_page'))
+
     audit('create_organisation', user_guid=user.guid,
-          detail={'org_guid': org.guid, 'name': name}, ip=request.remote_addr)
+          detail={'org_guid': org.guid, 'name': name,
+                  'parent_caregiver_guid': parent_guid}, ip=request.remote_addr)
     flash(f'Organisation "{name}" created.', 'success')
+    return redirect(url_for('frontend.admin_page'))
+
+
+@frontend_bp.route('/admin/set-org-parent', methods=['POST'])
+@_require_su_login
+def admin_set_org_parent():
+    """S8 (#410): re-parent an internal org — set/clear its vårdgivare. A blank
+    parent promotes the org to a top-level vårdgivare; a set parent makes it a
+    vårdenhet. The 2-level hierarchy is validated server-side."""
+    user = _get_session_user()
+    db = get_db()
+    org_guid = request.form.get('organisation_guid', '').strip()
+    parent_guid = (request.form.get('parent_caregiver_guid') or '').strip() or None
+
+    from src.models.organisation import Organisation
+    org = db.query(Organisation).filter_by(guid=org_guid).first()
+    if org is None:
+        flash('Organisation not found.', 'error')
+        return redirect(url_for('frontend.admin_page'))
+    if org.is_external:
+        flash('External partners are not part of the care hierarchy.', 'error')
+        return redirect(url_for('frontend.admin_page'))
+
+    org.parent_caregiver_guid = parent_guid
+    db.flush()
+
+    from src.services.care_hierarchy import validate_care_hierarchy, HierarchyError
+    try:
+        validate_care_hierarchy(db, org)
+    except HierarchyError as e:
+        db.rollback()
+        flash(f'Invalid care hierarchy: {e}', 'error')
+        return redirect(url_for('frontend.admin_page'))
+
+    audit('update_organisation', user_guid=user.guid,
+          detail={'org_guid': org_guid, 'parent_caregiver_guid': parent_guid},
+          ip=request.remote_addr)
+    flash(f'Updated hierarchy for "{org.name}".', 'success')
     return redirect(url_for('frontend.admin_page'))
 
 
@@ -1741,6 +1809,7 @@ ALLOWED_DOCS = {
     'integration-guide.md': 'Integration Guide',
     'subservice-onboarding.md': 'Subservice Onboarding & Acceptance',
     'admin-manual.md': 'Admin Manual',
+    'external-partners.md': 'External Partners',
     'deployment-guide.md': 'Deployment Guide',
     'pre-deployment-checklist.md': 'Pre-Deployment Checklist',
     'user-guide.md': 'User Guide',

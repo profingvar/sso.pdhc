@@ -4,10 +4,23 @@ Operations guide for SU (Super User) administrators and group administrators.
 
 ## Roles Overview
 
+Two orthogonal things are both loosely called "role" — keep them apart:
+
+**Administrative roles** (who can operate the panel):
+
 | Role | Scope | Key Actions |
 |------|-------|-------------|
-| **SU Admin** | System-wide | All admin operations, user management, org management |
+| **SU Admin** | System-wide | All admin operations, user management, org management, affiliations, registries, partners |
 | **Group Admin** | Per-group | Membership approvals, invites for own groups |
+
+**Professional (clinical) roles** are a separate concept introduced by the
+access-model reform (S1–S9). They live in an SU-managed **role registry**
+(`/api/registry/roles`, e.g. doctor, nurse, researcher, …) and are attached to
+a person through an **Affiliation** (person + CareUnit + Role), not stored as a
+free-text field. See **Affiliations & Guided Activation** and **Role &
+Research-Project Registries** below. A person's actual data access is composed
+downstream from three independent inputs: **phase grants**, **affiliations/role**,
+and **organisation scope** — no single one implies another.
 
 ## SU Admin Operations
 
@@ -154,6 +167,84 @@ Removes the `UserPhase` row. Since #57 this is sufficient on its own — there i
 
 ---
 
+### Affiliations & Guided Activation (S9, #411)
+
+This is the reform's core person-onboarding flow: **the person requests
+sign-on; the SU assigns.** A professional is created **pending** (zero access)
+and cannot be **activated** until their profile is complete. All completeness
+checks are computed **server-side** — the panel renders the same `missing` list
+the API enforces, so hiding a field in the UI cannot bypass a check.
+
+An **Affiliation** binds a person to a **CareUnit + Role** (with research
+projects when the role is `researcher`):
+
+- **Assign an affiliation:**
+  `POST /api/admin/users/<guid>/affiliations`
+  Body `{care_unit_guid, role_guid, research_project_guids?, is_admin?}`.
+  Server validations: the user is a professional; `care_unit_guid` is an
+  **internal** organisation; `role_guid` is in the role registry; a
+  `researcher` role requires ≥1 known `research_project_guid` and any other
+  role must carry none; `(person, unit, role)` is unique (409 on duplicate).
+- **List a person's affiliations + completeness:**
+  `GET /api/admin/users/<guid>/affiliations`
+- **Remove an affiliation:**
+  `DELETE /api/admin/users/<guid>/affiliations/<affiliation_guid>`
+- **Completeness checklist:** `GET /api/admin/users/<guid>/completeness`.
+  Typical `missing` codes: `no_active_affiliation`, `no_useful_phase_grant`
+  (no phase the held role can use), `researcher_affiliation_missing_projects`.
+
+**Activate / deactivate:**
+
+- `POST /api/admin/users/<guid>/activate` — flips `status` to `active`. Returns
+  **409 `incomplete_profile`** with the `missing` list while the profile is
+  incomplete.
+- `POST /api/admin/users/<guid>/deactivate` — sets a professional back to
+  `pending` (access is revoked on the next blob build; pair with **Flush
+  Sessions** for immediate effect). An SU admin cannot be deactivated.
+
+!!! note "Phases and affiliations are both required, and independent"
+    A complete profile needs **both** ≥1 affiliation **and** a phase grant the
+    role can use. Assigning an affiliation does not grant a phase, and granting
+    a phase does not create an affiliation — do both, then activate.
+
+---
+
+### Role & Research-Project Registries (S2/#398, #400)
+
+Two SU-managed registries feed the affiliation form. Reads are open to any
+authenticated professional; writes are **SU-only**.
+
+**Roles** — the clinical role vocabulary (doctor, nurse, researcher, …):
+
+- `GET /api/registry/roles` · `POST /api/registry/roles`
+- `PUT /api/registry/roles/<guid>` · `DELETE /api/registry/roles/<guid>`
+  (delete refuses if any affiliation still references the role).
+
+**Research projects** — referenced by `researcher` affiliations:
+
+- `GET /api/registry/research-projects` · `POST /api/registry/research-projects`
+- `PUT` / `DELETE /api/registry/research-projects/<guid>`
+
+!!! warning "Panel gap"
+    The SU panel currently **consumes** these registries (the affiliation form's
+    Role and Projects dropdowns) but has **no management UI** to create/rename/
+    retire a role or research project — do that via the API above until a
+    registry admin section is added.
+
+---
+
+### External Partners
+
+Third-party callers licensed to talk to PDHC are managed in the **External
+Partners** panel (this replaced the legacy `KEYAUTH_SERVICE_*` env registry).
+The panel supports register / rotate-secret / suspend / reactivate / revoke,
+with the cleartext secret shown **once** on register or rotate.
+
+See the dedicated **[External Partners](external-partners.md)** document for the
+full model, endpoints (`/api/admin/partners…`), auth kinds, and scopes.
+
+---
+
 ### Organisation Management
 
 Organisations are the **single source of truth** across all PDHC services.
@@ -168,10 +259,40 @@ Lists all registered organisations with GUID and creation date.
 
 Add a new organisation. Name must be unique.
 
-**API:** `POST /api/admin/organisations` with `{name}`
+**API:** `POST /api/admin/organisations` with `{name}` (optionally
+`{parent_caregiver_guid}` — see Care Hierarchy below).
 
 !!! note
     Downstream services pull organisation lists from `GET /api/public/organisations`. New organisations are immediately available system-wide.
+
+#### Care Hierarchy — vårdgivare / CareUnit (S8, #410/#187)
+
+Organisations form a **2-level PDL care hierarchy** on a single
+self-referential table (`parent_caregiver_guid`):
+
+- `parent_caregiver_guid = NULL` → the row **is** a caregiver (vårdgivare;
+  the legal entity). Exposed as the **CareOrganisation** view.
+- `parent_caregiver_guid = <guid>` → the row is a **CareUnit** under that
+  caregiver.
+
+An organisation also carries an `is_external` flag distinguishing internal PDHC
+organisations from external partner orgs. **Affiliations may only target an
+internal organisation** (`is_external = false`) — so an org must exist and be
+internal before a professional can be affiliated to it.
+
+- Set/relocate the parent on create or update:
+  `POST` / `PUT /api/admin/organisations[/<guid>]` with `parent_caregiver_guid`.
+  The 2-level hierarchy is validated server-side (`validate_care_hierarchy`);
+  an invalid parent (self-reference, or a parent that is itself a CareUnit)
+  returns `400 invalid_hierarchy`.
+- Read the derived views: `GET /api/registry/care-organisations` (caregivers)
+  and `GET /api/registry/care-units`.
+
+!!! warning "Panel gap"
+    The current SU panel's Create-Organisation form only sends `name`, and the
+    org table does not show parent / internal-external. Until that is added,
+    set `parent_caregiver_guid` and `is_external` via the API (`PUT
+    /api/admin/organisations/<guid>`).
 
 ---
 
@@ -190,7 +311,12 @@ Professionals can suggest new groups via the UI. Proposals appear in the admin p
 
 **API:** `GET /api/admin/group-proposals` and `POST /api/admin/group-proposals` with `{proposal_guid, decision}`
 
-Group types: `planning`, `request`, `provider`, `analysis`
+!!! note "`category` is a free-form label, not a phase (#60, #57)"
+    A group's `category` is a **free-text organisational label** (since #60 —
+    formerly a 4-value `group_type` enum). It has **no effect on access**.
+    Do **not** reuse phase names (`planning`/`request`/`provider`/`analysis`)
+    as categories — group membership does not confer phases (#57); the panel
+    warns against this. Phases are granted per-user in the Person Registry.
 
 #### Delete Group
 
@@ -232,15 +358,26 @@ pending → endorsed → approved (creates account)
 
 1. **Pending** — new request submitted. SU can endorse or reject.
 2. **Endorsed** — leader endorsement recorded. SU can approve or reject.
-3. **Approved** — system creates:
-   - User account (professional type)
+3. **Approved** — system creates a **pending** professional with **zero
+   access**:
+   - User account (`user_type = professional`, **`status = pending`**)
    - Professional record (with role, name)
    - Organisation link
-   - Memberships for all requested phases (auto-approved)
+   - **Nothing else.** No phase grants, no affiliations, no active access.
 
 **API:** `GET /api/admin/access-requests` and `POST /api/admin/access-requests` with `{access_request_guid, decision}`
 
 `decision` values: `endorsed`, `approved`, `rejected`
+
+!!! warning "Approval does not grant access (#57, S9 #411)"
+    Approving an access request **does not** auto-grant the requested phases,
+    and **does not** activate the user. The request's `organisation_guid` and
+    `professional_role` survive only as a **non-authoritative hint** the guided
+    UI prefills from (`requested_phases_pending_su_grant` / `hint` in the
+    response). After approval the SU must, in the **Activation & Affiliations**
+    panel: (1) assign ≥1 **affiliation** (CareUnit + Role), (2) grant the phase(s)
+    the role should hold, then (3) **activate** the user. Activation is blocked
+    server-side until the profile is complete — see the next section.
 
 ---
 
@@ -307,5 +444,7 @@ All admin actions are logged to structured audit files in `LOG_DIR`:
 - Forced password resets (#43) — actor, target, whether a temp password was supplied
 - Session flushes (#44) — actor, target, new `token_revocation_epoch`
 - Direct phase grants and revocations (#46)
+- Affiliation create/delete, user activate/deactivate (S9, #411)
+- External partner register / rotate / suspend / reactivate / revoke
 
 Logs include: timestamp, action type, actor GUID, target GUID, IP address, and action-specific details.

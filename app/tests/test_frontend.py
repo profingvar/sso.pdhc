@@ -258,6 +258,70 @@ class TestSUAdminPage:
         assert resp.status_code == 200
         assert b'New Org' in resp.data
 
+    def test_admin_create_care_unit_under_caregiver(self, client, app):
+        """S8 (#410): creating an org with a parent caregiver makes it a
+        vårdenhet; the panel shows the Vårdenhet kind + parent name."""
+        guid, token = _make_su(app)
+        _login_session(client, app, token)
+
+        with app.app_context():
+            s = get_session()
+            cg = Organisation(name='Region Vårdgivare')
+            s.add(cg)
+            s.flush()
+            cg_guid = cg.guid
+
+        resp = client.post('/admin/create-organisation',
+                           data={'name': 'Clinic Unit',
+                                 'parent_caregiver_guid': cg_guid},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert 'Clinic Unit' in html
+        assert 'Vårdenhet' in html  # kind badge rendered
+
+        with app.app_context():
+            s = get_session()
+            unit = s.query(Organisation).filter_by(name='Clinic Unit').first()
+            assert unit.parent_caregiver_guid == cg_guid
+            assert unit.is_care_unit
+
+    def test_admin_set_org_parent_reparents(self, client, app):
+        """S8: /admin/set-org-parent sets/clears the vårdgivare; blank promotes
+        the org back to a top-level caregiver."""
+        guid, token = _make_su(app)
+        _login_session(client, app, token)
+
+        with app.app_context():
+            s = get_session()
+            cg = Organisation(name='CG')
+            unit = Organisation(name='Unit')
+            s.add_all([cg, unit])
+            s.flush()
+            cg_guid, unit_guid = cg.guid, unit.guid
+
+        # attach unit under the caregiver
+        resp = client.post('/admin/set-org-parent',
+                           data={'organisation_guid': unit_guid,
+                                 'parent_caregiver_guid': cg_guid},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+        with app.app_context():
+            s = get_session()
+            assert s.query(Organisation).filter_by(
+                guid=unit_guid).first().parent_caregiver_guid == cg_guid
+
+        # blank parent promotes it back to a vårdgivare
+        resp = client.post('/admin/set-org-parent',
+                           data={'organisation_guid': unit_guid,
+                                 'parent_caregiver_guid': ''},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+        with app.app_context():
+            s = get_session()
+            assert s.query(Organisation).filter_by(
+                guid=unit_guid).first().parent_caregiver_guid is None
+
     def test_admin_decide_access_request(self, client, app):
         guid, token = _make_su(app)
         _login_session(client, app, token)

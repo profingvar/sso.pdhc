@@ -34,13 +34,62 @@ Tjänsten levererar alltså en **”access blob”** (profil + grupper/faser) oc
 
 En professionell har alltså följande attribut:
 Namn
-Yrke
-Fastillhörigheter
+Yrke (fri roll ur **rollregistret**, se reform-avsnittet nedan)
+**Affilieringar** (person + vårdenhet + roll — den centrala åtkomstprimitiven efter reformen)
+Fastillhörigheter (direkta `UserPhase`-grants)
 Organisationstillhörigheter
 Grupptillhörigheter
+Aktiveringsstatus: `pending` / `active`
 Privilegierställning: Användare/gruppledare/SU
 
+> **OBS (åtkomstmodell-reformen S1–S9):** Ovanstående lista är den ursprungliga
+> modellen. Efter reformen är **affiliering** (person + vårdenhet + roll) den
+> bärande strukturen, en professionell skapas `pending` (noll åtkomst) och
+> **aktiveras** först när profilen är komplett. Se avsnittet
+> "Åtkomstmodell-reformen" nedan.
+
 En patient som vill logga in på patientportalen Använder sitt personnummer och får systemwide sina data listade. Patienterna med tillträde listas i en annan tjänst (ips.pdhc). De loggar in med (mock) Bankid i patientportalen (minadata.pdhc). 
+
+## Åtkomstmodell-reformen (S1–S9): affilieringar, roller, vårdgivarhierarki
+
+Reformen (ärenden #397–#411, driftsatt 2026-07-06, S9 #411 därefter) lade till
+en strukturerad åtkomstmodell **ovanpå** de ursprungliga byggstenarna. Faser,
+grupper och organisationsscope finns kvar oförändrade — reformen inför följande
+nya delar, och de gamla `legacy`-fälten i access-blobben skickas fortfarande
+under övergången (kill-switch `SSO_EMIT_LEGACY_BLOB_FIELDS`, #409, default på).
+
+- **Rollregister (`Role`, #398):** en SU-förvaltad vokabulär av kliniska roller
+  (läkare, sjuksköterska, forskare, …). Roll är **inte** längre ett fritt
+  textfält på professional-raden utan en referens till registret.
+  `GET/POST/PUT/DELETE /api/registry/roles` (läsning öppen för professionella,
+  skrivning endast SU).
+- **Forskningsprojektregister (`ResearchProject`, #400):** refereras av
+  forskar-affilieringar. `…/api/registry/research-projects`.
+- **Vårdgivarhierarki (2 nivåer, S8 #410/#187):** organisationer bildar en
+  självrefererande hierarki via `parent_caregiver_guid`. `NULL` ⇒ raden **är**
+  en **vårdgivare** (CareOrganisation, juridisk enhet); satt ⇒ raden är en
+  **vårdenhet** (CareUnit) under den vårdgivaren. Flaggan `is_external` skiljer
+  interna PDHC-organisationer från externa partnerorganisationer. Validering
+  sker serverside (`validate_care_hierarchy`). Vyer:
+  `GET /api/registry/care-organisations` och `/care-units`.
+- **Affiliering (`Affiliation`, S9 #411):** binder **person + vårdenhet + roll**
+  (plus forskningsprojekt om rollen är `researcher`). Detta är den bärande
+  åtkomststrukturen. Endast intern organisation får vara vårdenhet i en
+  affiliering. Endast SU skapar/tar bort affilieringar
+  (`/api/admin/users/<guid>/affiliations`).
+- **Guidad aktivering (S9 #411):** personen begär inloggning (publik
+  access-request); **godkännande skapar en `pending`-person med noll åtkomst.**
+  SU tilldelar ≥1 affiliering + fas(er) och **aktiverar**. Aktivering är
+  **serverside-spärrad** tills profilen är komplett
+  (`GET …/completeness`, `POST …/activate` → 409 `incomplete_profile` med en
+  `missing`-lista). `POST …/deactivate` återför till `pending`.
+- **Externa partners (#…):** ersätter det gamla `KEYAUTH_SERVICE_*`-registret.
+  Tredjepartsanropare hanteras via `/api/admin/partners…` (registrera, rotera
+  hemlighet, suspendera, återaktivera, återkalla). Se `external-partners.md`.
+
+**Blob-konsekvens:** access-blobben bär nu även affilierings-/roll-härledda
+fält vid sidan av `effective_phases` och `groups`. En professionell som är
+`pending` (ej aktiverad) ska behandlas som utan åtkomst av nedströmstjänster.
 
 ## Översikt: vad tjänsten är och vad den gör
 
@@ -123,9 +172,12 @@ SU admin är den högsta administrativa nivån och kan:
 - **Hantera gruppförslag**: users kan föreslå nya grupper; SU admin kan godkänna (skapar grupp) eller avslå.
 - **Hantera gruppledarförfrågningar**: SU admin kan godkänna (ger adminstatus) eller avslå.
 - **Hantera åtkomstansökningar**: SU admin (och i vissa fall vald gruppledare) kan lista, uppdatera, endorsa eller avvisa access requests.
-- **Hantera organisationer**: lista och skapa organisationer (organisationer är en viktig dimension för datascope i nedströmssystem).
+- **Hantera organisationer**: lista och skapa organisationer (organisationer är en viktig dimension för datascope i nedströmssystem), inklusive **vårdgivarhierarki** (`parent_caregiver_guid`) och `is_external` (S8 #410).
+- **Hantera affilieringar och aktivering (S9 #411)**: tilldela/ta bort affilieringar (vårdenhet + roll) per person, kontrollera profil-kompletthet och **aktivera/avaktivera** professionella. Aktivering är serverside-spärrad tills profilen är komplett.
+- **Hantera register**: roll-registret och forskningsprojekt-registret (`/api/registry/*`, skrivning endast SU).
+- **Hantera externa partners**: registrera/rotera/suspendera/återkalla tredjepartsanropare (ersätter `KEYAUTH_SERVICE_*`).
 
-Det här är tjänstens “governance”-del: den skapar och förvaltar de strukturer (organisationer, grupper, adminskap, medlemskap) som nedströmstjänster sedan använder för auktorisering.
+Det här är tjänstens “governance”-del: den skapar och förvaltar de strukturer (organisationer, vårdgivarhierarki, affilieringar, roller, grupper, adminskap, medlemskap, partners) som nedströmstjänster sedan använder för auktorisering.
 
 ## Publika (oautentiserade) katalog- och onboarding-endpoints
 

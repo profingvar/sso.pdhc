@@ -203,16 +203,50 @@
     </div>
 </div>
 
-<!-- Organisations -->
+<!-- Organisations (S8 #410 care hierarchy: vårdgivare / vårdenhet) -->
 <div class="card">
     <h3>Organisations</h3>
+    <p class="text-muted" style="margin:0 0 0.5rem;font-size:0.82rem;">
+        Internal orgs form a 2-level care hierarchy: a <strong>Vårdgivare</strong>
+        (caregiver, top level) with <strong>Vårdenheter</strong> (care units) under
+        it. Affiliations may only target an internal org. External partners are
+        managed in the External Partners panel below and are not part of the
+        hierarchy.
+    </p>
+    <div style="overflow-x:auto;">
     <table>
-        <thead><tr><th>Name</th><th>Users</th><th>Patients</th><th>Requests</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Name</th><th>Kind / Parent</th><th>Users</th><th>Patients</th><th>Requests</th><th>Actions</th></tr></thead>
         <tbody>
         {% for o in organisations %}
             {# GUID kept as a tooltip on hover for SU debugging; not displayed inline. #}
             <tr>
                 <td title="GUID: {{ o.organisation_guid }}">{{ o.name }}</td>
+                <td style="font-size:0.8rem;">
+                    {% if o.kind == 'external' %}
+                        <span class="badge" style="background:#ede9fe;color:#5b21b6;">External</span>
+                    {% else %}
+                        {% if o.kind == 'care_organisation' %}
+                            <span class="badge" style="background:#dbeafe;color:#1e40af;">Vårdgivare</span>
+                        {% else %}
+                            <span class="badge" style="background:#dcfce7;color:#166534;">Vårdenhet</span>
+                            <span style="color:var(--muted);">↳ {{ o.parent_caregiver_name or (o.parent_caregiver_guid[:8] ~ '…') }}</span>
+                        {% endif %}
+                        {# S8: re-parent inline. Blank = promote to vårdgivare. #}
+                        <form method="post" action="/admin/set-org-parent" style="display:inline-flex;gap:2px;align-items:center;margin-left:4px;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="organisation_guid" value="{{ o.organisation_guid }}">
+                            <select name="parent_caregiver_guid" style="font-size:0.68rem;padding:1px 3px;max-width:130px;">
+                                <option value="">— (vårdgivare)</option>
+                                {% for c in organisations %}
+                                    {% if c.kind == 'care_organisation' and c.organisation_guid != o.organisation_guid %}
+                                    <option value="{{ c.organisation_guid }}" {% if c.organisation_guid == o.parent_caregiver_guid %}selected{% endif %}>{{ c.name }}</option>
+                                    {% endif %}
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn-sm btn-secondary" style="padding:1px 5px;font-size:0.68rem;">Set</button>
+                        </form>
+                    {% endif %}
+                </td>
                 <td>{{ o.user_assignment_count }}</td>
                 <td>{{ o.patient_count }}</td>
                 <td>{{ o.access_request_count }}</td>
@@ -236,11 +270,23 @@
         {% endfor %}
         </tbody>
     </table>
-    <form method="post" action="/admin/create-organisation" class="mt-2" style="display:flex;gap:0.5rem;align-items:end;">
+    </div>
+    <form method="post" action="/admin/create-organisation" class="mt-2" style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-group" style="flex:1;margin-bottom:0;">
+        <div class="form-group" style="flex:1;margin-bottom:0;min-width:160px;">
             <label for="org_name">New Organisation</label>
             <input type="text" id="org_name" name="name" required placeholder="Organisation name">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+            <label for="org_parent" title="Leave blank to create a top-level vårdgivare; pick a caregiver to create a vårdenhet under it.">Parent vårdgivare (optional)</label>
+            <select id="org_parent" name="parent_caregiver_guid" style="max-width:200px;">
+                <option value="">— none (create vårdgivare)</option>
+                {% for c in organisations %}
+                    {% if c.kind == 'care_organisation' %}
+                    <option value="{{ c.organisation_guid }}">{{ c.name }}</option>
+                    {% endif %}
+                {% endfor %}
+            </select>
         </div>
         <button type="submit" class="btn btn-primary">Create</button>
     </form>
@@ -411,6 +457,7 @@
             <tr><td>Integration Guide</td><td><a href="/docs/download/integration-guide.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
             <tr><td>Subservice Onboarding & Acceptance</td><td><a href="/docs/download/subservice-onboarding.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
             <tr><td>Admin Manual</td><td><a href="/docs/download/admin-manual.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
+            <tr><td>External Partners</td><td><a href="/docs/download/external-partners.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
             <tr><td>Deployment Guide</td><td><a href="/docs/download/deployment-guide.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
             <tr><td>Pre-Deployment Checklist</td><td><a href="/docs/download/pre-deployment-checklist.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
             <tr><td>User Guide</td><td><a href="/docs/download/user-guide.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
@@ -529,6 +576,83 @@
                 <tr><td colspan="7" style="text-align:center;color:var(--text-muted,#6b7280);padding:0.75rem;">Loading...</td></tr>
             </tbody>
         </table>
+    </div>
+</div>
+
+<!-- Registries — Roles & Research Projects (S2 #398 / #400) -->
+<div class="card">
+    <h3>Registries — Roles &amp; Research Projects</h3>
+    <p class="text-muted" style="font-size:0.85rem;margin:0 0 0.5rem;">
+        SU-managed reference lists that feed the Affiliations form above. Reads are
+        open to professionals; writes are SU-only. A role's <em>permitted phases</em>
+        decide which phase grants make an affiliation "useful" for activation.
+    </p>
+    <p id="reg-error" style="display:none;color:#dc2626;font-size:0.85rem;"></p>
+    <div class="grid-2">
+        <div>
+            <h4 style="margin:0 0 0.4rem;font-size:0.95rem;">Roles</h4>
+            <div style="overflow-x:auto;"><table style="font-size:0.82rem;">
+                <thead><tr><th>Code</th><th>Name</th><th>Zone</th><th>Phases</th><th></th></tr></thead>
+                <tbody id="reg-roles-body"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody>
+            </table></div>
+            <div style="display:flex;gap:0.35rem;flex-wrap:wrap;align-items:center;margin-top:0.4rem;">
+                <input id="reg-role-code" placeholder="code" style="width:90px;font-size:0.78rem;padding:2px 4px;">
+                <input id="reg-role-name" placeholder="display name" style="width:120px;font-size:0.78rem;padding:2px 4px;">
+                <select id="reg-role-zone" style="font-size:0.78rem;"><option value="care">care</option><option value="analysis">analysis</option></select>
+                <span id="reg-role-phases" style="display:inline-flex;gap:6px;font-size:0.75rem;align-items:center;">
+                    {% for pn in phase_names %}<label style="font-weight:400;"><input type="checkbox" value="{{ pn }}"> {{ pn }}</label>{% endfor %}
+                </span>
+                <button class="btn btn-sm btn-primary" onclick="window._regAddRole()" style="font-size:0.75rem;">Add role</button>
+            </div>
+        </div>
+        <div>
+            <h4 style="margin:0 0 0.4rem;font-size:0.95rem;">Research projects</h4>
+            <div style="overflow-x:auto;"><table style="font-size:0.82rem;">
+                <thead><tr><th>Name</th><th>Ethics ref</th><th></th></tr></thead>
+                <tbody id="reg-proj-body"><tr><td colspan="3" class="text-muted">Loading…</td></tr></tbody>
+            </table></div>
+            <div style="display:flex;gap:0.35rem;flex-wrap:wrap;align-items:center;margin-top:0.4rem;">
+                <input id="reg-proj-name" placeholder="project name" style="width:130px;font-size:0.78rem;padding:2px 4px;">
+                <input id="reg-proj-ethics" placeholder="ethics ref (opt)" style="width:110px;font-size:0.78rem;padding:2px 4px;">
+                <button class="btn btn-sm btn-primary" onclick="window._regAddProject()" style="font-size:0.75rem;">Add project</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Service Key Management — per-user API keys on keyed sibling services -->
+<div class="card">
+    <h3>Service Key Management</h3>
+    <p class="text-muted" style="font-size:0.85rem;margin:0 0 0.5rem;">
+        Mint per-user API keys on keyed sibling services (SSO proxies the request).
+        Pick a service, review its users, then generate a scoped key. This is
+        distinct from External Partners — it manages internal per-user keys on
+        services registered in <code>KEYED_SERVICES</code>.
+    </p>
+    <p id="km-empty" class="text-muted" style="display:none;">No keyed services are configured (<code>KEYED_SERVICES</code> is empty).</p>
+    <p id="km-error" style="display:none;color:#dc2626;font-size:0.85rem;"></p>
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <select id="km-service" style="font-size:0.85rem;max-width:220px;"><option value="">Select service…</option></select>
+        <button class="btn btn-sm btn-secondary" onclick="window._kmLoadUsers()">Load users</button>
+    </div>
+    <div id="km-users" style="display:none;margin-top:0.6rem;overflow-x:auto;">
+        <table style="font-size:0.85rem;">
+            <thead><tr><th>Username</th><th>Role</th><th>Active</th><th>Keys</th><th></th></tr></thead>
+            <tbody id="km-users-body"></tbody>
+        </table>
+    </div>
+    <div id="km-generate" style="display:none;margin-top:0.6rem;padding:0.6rem;border:1px solid var(--border,#d1d5db);border-radius:6px;background:#f9fafb;">
+        <h4 style="margin:0 0 0.5rem;font-size:0.9rem;">Generate a key</h4>
+        <div style="display:flex;gap:0.6rem;flex-wrap:wrap;align-items:end;font-size:0.85rem;">
+            <label>Username<br><input id="km-username" style="padding:3px 5px;"></label>
+            <label>Label (optional)<br><input id="km-label" style="padding:3px 5px;"></label>
+            <label title="Comma- or space-separated scopes">Scopes<br><input id="km-scopes" value="read" style="padding:3px 5px;"></label>
+            <button class="btn btn-sm btn-primary" onclick="window._kmGenerate()">Generate</button>
+        </div>
+        <div id="km-result" style="display:none;margin-top:0.5rem;padding:0.5rem;background:#fef3c7;border:1px solid #f59e0b;border-radius:4px;">
+            <strong>New key — copy now, shown once:</strong><br>
+            <code id="km-raw-key" style="word-break:break-all;user-select:all;"></code>
+        </div>
     </div>
 </div>
 
@@ -945,6 +1069,84 @@
         msg(r.ok ? 'Deactivated (pending).' : 'failed', !r.ok);
         s9Load();
     };
+})();
+</script>
+
+<script>
+// Registries admin — Roles + Research Projects CRUD against /api/registry/*.
+// Reads open to professionals; writes SU-only (server enforces).
+(function() {
+    function rhdrs() {
+        const token = window.SSO_TOKEN || (typeof getCookie === 'function' && getCookie('sso_token'));
+        return token ? {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
+                     : {'Content-Type': 'application/json'};
+    }
+    const rerr = m => { const e = document.getElementById('reg-error'); if (!e) return;
+                        e.textContent = m || ''; e.style.display = m ? 'block' : 'none'; };
+    const esc = s => (s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    async function loadRoles() {
+        const r = await fetch('/api/registry/roles', {headers: rhdrs()});
+        const rows = r.ok ? await r.json() : [];
+        const tb = document.getElementById('reg-roles-body');
+        tb.innerHTML = rows.length ? rows.map(x => `<tr>
+            <td><code>${esc(x.code)}</code></td><td>${esc(x.display_name)}</td><td>${esc(x.zone)}</td>
+            <td style="font-size:0.72rem;">${(x.permitted_phases || []).join(', ') || '—'}</td>
+            <td><button class="btn btn-sm btn-danger" style="font-size:0.7rem;padding:1px 5px;"
+                onclick="window._regDelRole('${x.guid}','${esc(x.code)}')">del</button></td>
+            </tr>`).join('') : '<tr><td colspan="5" class="text-muted">none</td></tr>';
+    }
+    async function loadProjects() {
+        const r = await fetch('/api/registry/research-projects', {headers: rhdrs()});
+        const rows = r.ok ? await r.json() : [];
+        const tb = document.getElementById('reg-proj-body');
+        tb.innerHTML = rows.length ? rows.map(x => `<tr>
+            <td>${esc(x.name)}</td><td style="font-size:0.72rem;">${esc(x.ethics_ref) || '—'}</td>
+            <td><button class="btn btn-sm btn-danger" style="font-size:0.7rem;padding:1px 5px;"
+                onclick="window._regDelProject('${x.guid}')">del</button></td>
+            </tr>`).join('') : '<tr><td colspan="3" class="text-muted">none</td></tr>';
+    }
+
+    window._regAddRole = async function() {
+        rerr('');
+        const code = document.getElementById('reg-role-code').value.trim();
+        const name = document.getElementById('reg-role-name').value.trim();
+        const zone = document.getElementById('reg-role-zone').value;
+        const phases = [...document.querySelectorAll('#reg-role-phases input:checked')].map(b => b.value);
+        if (!code || !name) { rerr('Role code and display name are required.'); return; }
+        const r = await fetch('/api/registry/roles', {method: 'POST', headers: rhdrs(),
+            body: JSON.stringify({code, display_name: name, zone, permitted_phases: phases})});
+        if (!r.ok) { const d = await r.json().catch(() => ({})); rerr(d.message || d.error || 'create failed'); return; }
+        document.getElementById('reg-role-code').value = '';
+        document.getElementById('reg-role-name').value = '';
+        loadRoles();
+    };
+    window._regDelRole = async function(guid, code) {
+        if (!confirm('Delete role "' + code + '"? Refused if any affiliation uses it.')) return;
+        const r = await fetch('/api/registry/roles/' + guid, {method: 'DELETE', headers: rhdrs()});
+        if (!r.ok) { const d = await r.json().catch(() => ({})); rerr(d.message || d.error || 'delete failed'); return; }
+        loadRoles();
+    };
+    window._regAddProject = async function() {
+        rerr('');
+        const name = document.getElementById('reg-proj-name').value.trim();
+        const ethics = document.getElementById('reg-proj-ethics').value.trim();
+        if (!name) { rerr('Project name is required.'); return; }
+        const r = await fetch('/api/registry/research-projects', {method: 'POST', headers: rhdrs(),
+            body: JSON.stringify({name, ethics_ref: ethics || null})});
+        if (!r.ok) { const d = await r.json().catch(() => ({})); rerr(d.message || d.error || 'create failed'); return; }
+        document.getElementById('reg-proj-name').value = '';
+        document.getElementById('reg-proj-ethics').value = '';
+        loadProjects();
+    };
+    window._regDelProject = async function(guid) {
+        if (!confirm('Delete this research project?')) return;
+        const r = await fetch('/api/registry/research-projects/' + guid, {method: 'DELETE', headers: rhdrs()});
+        if (!r.ok) { const d = await r.json().catch(() => ({})); rerr(d.message || d.error || 'delete failed'); return; }
+        loadProjects();
+    };
+
+    document.addEventListener('DOMContentLoaded', () => { loadRoles(); loadProjects(); });
 })();
 </script>
 {% endblock %}

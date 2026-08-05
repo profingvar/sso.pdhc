@@ -378,3 +378,29 @@ All edited files listed with full path (Rule 17).
   `up -d app` — because active_affiliations has no missing-table guard and prod
   boot doesn't create_all, so swapping code before the tables exist would 500
   every professional /api/auth/me and break auth platform-wide.
+
+## 2026-08-05 — docs reform-sync (admin page audit follow-up, phase B)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/admin-manual.md
+  (fixed wrong access-request-approval text; added Affiliations & Guided
+  Activation S9, Care Hierarchy S8, Role/Research-Project registries, External
+  Partners; corrected stale group-type enum; audit-trail additions)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/SSO_Service_Functions_SV.md
+  (added "Åtkomstmodell-reformen S1–S9" section; updated professional-attribute
+  list + SU-functions list to cover affiliations/activation/registries/partners)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/mkdocs.yml
+  (added External Partners to nav)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/site/**
+  (regenerated via `mkdocs build` — includes external-partners page)
+
+## 2026-08-05 — SU admin-page reform-sync (phase A)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py
+  (admin_page: care-hierarchy fields on org list; admin_create_org: accept +
+  validate parent_caregiver_guid; NEW admin_set_org_parent re-parent handler;
+  ALLOWED_DOCS += external-partners.md)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/su_admin.html
+  (Organisations: Kind/Parent column + inline re-parent + parent selector on
+  create; RESTORED Service Key Management card matching the km-* JS; NEW
+  Registries card (Roles + Research Projects CRUD) + JS; docs card += External
+  Partners row)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_frontend.py
+  (added test_admin_create_care_unit_under_caregiver + test_admin_set_org_parent_reparents)

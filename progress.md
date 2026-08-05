@@ -528,3 +528,59 @@ Backups (rollback image tags + source tars + gateway full DB dump) in
   confirmation); **S9 (#411)** guided sign-on UI.
 - **#424** (gateway's 10 pre-existing broken tests) — **RESOLVED** during
   gateway deploy prep; suite now green, fixes rode along in #434.
+
+## 2026-08-05 — SU admin-page audit + doc reform-sync (phase B)
+
+Audit request: "Is the SU admin page correctly reflecting SSO capabilities?
+Is the local manual/documentation up to date?" Findings (read-only, Rule 12/19):
+
+Admin page (su_admin.html) — mostly faithful, but:
+1. Orphaned **Service Key Management** JS (lines ~759–848) drives km-* IDs that
+   no longer exist in the body → live TypeError on every load; the backend
+   endpoints (/api/admin/service-keys[/…/generate]) + KEYED_SERVICES still exist.
+   Restore-vs-remove decision → phase A.
+2. **Care hierarchy (S8 #410)** not surfaced: create-org form is name-only, no
+   parent/internal-external column, though the API supports parent_caregiver_guid
+   + is_external and affiliations REQUIRE an internal care unit.
+3. **Role/Research-Project registries** have no management UI (panel only
+   consumes them as dropdowns).
+- external-partners.md was orphaned from nav + download allowlist + admin card.
+
+Phase B done (docs, local only — operator deploys):
+- admin-manual.md: corrected the WRONG "Approved → memberships for all requested
+  phases (auto-approved)" text to the S9 reality (pending user, zero access,
+  SU assigns affiliation+phase then activates); added sections for Affiliations
+  & Guided Activation (S9), Care Hierarchy (S8), Role/Research-Project registries,
+  External Partners; fixed stale group-type enum → free-form category.
+- SSO_Service_Functions_SV.md: added "Åtkomstmodell-reformen (S1–S9)" section;
+  updated professional-attribute + SU-functions lists.
+- mkdocs.yml: External Partners added to nav; `mkdocs build` regenerated site
+  (exit 0; external-partners + admin-manual pages present).
+- NOTE: this is LOCAL only. Operator must deploy the rebuilt docs to the server
+  per Rule 12/19 (site/ + source .md). Also note progress "Known follow-ups"
+  above lists S9 (#411) as deferred — it is in fact DONE + deployed (git log).
+
+Phase A (code/UI: su_admin.html service-key card, care-hierarchy org fields,
+registry admin section, ALLOWED_DOCS + docs card wiring) — NEXT.
+
+## 2026-08-05 — SU admin-page reform-sync (phase A) DONE
+
+Closed the 3 gaps + 1 broken remnant found in the phase-B audit:
+1. **Service Key Management** — RESTORED the HTML card (matched to the orphaned
+   km-* JS + live /api/admin/service-keys endpoints). No more load-time TypeError.
+2. **Care hierarchy (S8 #410)** — org list now carries kind/parent; create-org
+   form takes an optional parent vårdgivare (validated); NEW /admin/set-org-parent
+   inline re-parent per internal org; table shows Vårdgivare/Vårdenhet/External.
+3. **Registries** — NEW Roles + Research-Projects CRUD card (create/list/delete)
+   against /api/registry/*, with permitted-phase checkboxes on roles.
+4. external-partners.md wired into ALLOWED_DOCS + the docs card (nav done in B).
+
+Validation: py_compile + jinja parse clean; test_admin (32) + registry/frontend/
+care-hierarchy/affiliation (79) + full test_frontend (36, incl. 2 new hierarchy
+tests) all green. LOCAL only — operator deploys su_admin.html + frontend.py per
+Rule 12/19 (graceful restart of sso_app; note the sso safe_restart Colima-forward
+gotcha in memory before restarting).
+
+Deferred/notes: role EDIT (PUT) not surfaced in the registry card (create+delete
+only); affiliation is_admin flag still not sent by the S9 form; org is_external
+toggle stays API/Partners-panel only (create-org here is internal-only by design).
