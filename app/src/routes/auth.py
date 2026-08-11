@@ -1,4 +1,5 @@
 """Authentication API routes — login, me, me/service, logout, change-password."""
+import hmac
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlparse
 
@@ -130,7 +131,12 @@ def me_service():
     client_secret = request.headers.get('X-SSO-Client-Secret', '')
 
     service_creds = config.get('SERVICE_CREDENTIALS', {})
-    if not client_id or service_creds.get(client_id) != client_secret:
+    # Constant-time secret compare (this endpoint gates every service's token
+    # validation; `!=` leaks the client secret via timing — matches the
+    # hmac.compare_digest pattern in auth_middleware). Encode to bytes so a
+    # non-ASCII header 403s rather than raising.
+    expected = service_creds.get(client_id) if client_id else None
+    if not expected or not hmac.compare_digest(client_secret.encode(), expected.encode()):
         audit('service_auth_fail', detail={'client_id': client_id}, ip=request.remote_addr)
         return jsonify({"error": "invalid_service_credentials",
                         "message": "Valid X-SSO-Client-Id and X-SSO-Client-Secret required"}), 403
