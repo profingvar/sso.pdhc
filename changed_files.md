@@ -404,3 +404,4 @@ All edited files listed with full path (Rule 17).
   Partners row)
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_frontend.py
   (added test_admin_create_care_unit_under_caregiver + test_admin_set_org_parent_reparents)
+- app/src/routes/auth.py — /me/service service-credential compare now hmac.compare_digest (was !=, timing side-channel on the SSO client secret; the endpoint every service calls). Deployed + live-verified (200/403/403).
