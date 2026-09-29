@@ -585,7 +585,10 @@ Deferred/notes: role EDIT (PUT) not surfaced in the registry card (create+delete
 only); affiliation is_admin flag still not sent by the S9 form; org is_external
 toggle stays API/Partners-panel only (create-org here is internal-only by design).
 
-## #709 — `require_organisation` removed, and why it must not come back (2026-09-29)
+## Ticket #707 — `require_organisation` removed, and why it must not come back (2026-09-29)
+
+(Committed as "#709" — the ticket was created afterwards and came back as
+#707. See ~/T7_sidewinder/docs/wiring_triage_2026-09-29.md for the mapping.)
 
 The #704 triage found a complete auth decorator in
 `app/src/middleware/auth_middleware.py` — "a professional must hold at least
