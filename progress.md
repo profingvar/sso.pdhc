@@ -716,11 +716,33 @@ is roughly one row per logout, so it was years from being a problem rather
 than months. It sits on the hot path, which is why it is worth closing, not
 because the table was large.
 
-### Still outstanding
+### Cron INSTALLED 2026-09-29
 
-The cron entry is **not** installed. Daily is ample:
 ```
-7 4 * * *  /opt/homebrew/bin/docker exec sso_app python scripts/prune_tokens.py >> ~/logs/prune_tokens.log 2>&1
+7 4 * * * docker exec sso_app python scripts/prune_tokens.py 2>&1 | while read l; do echo "$(date -u) $l"; done >> /Users/miserver/logs/prune_tokens.log
 ```
-A standing cron entry is a change to server state and the operator's call.
-Until it exists, the table grows again from zero.
+
+Daily at 04:07 UTC, in miserver's crontab beside the consent reconciler.
+Notes on the shape of that line:
+
+- **No `%` anywhere.** In a crontab a bare `%` means a newline and must be
+  escaped; a `date +%F` in a cron line is a classic way to install something
+  that silently never runs. `date -u` with no format string avoids the trap
+  entirely.
+- **Timestamped through a `while read` loop** rather than a prefix
+  substitution, for the same reason. Without it the log would be undated
+  lines with no way to tell when a run happened.
+- **Plain `docker`, not an absolute path**, matching the reconciler line —
+  the crontab sets `PATH` in its header. The docker context is inherited
+  correctly from cron; verified by running the exact line under
+  `env -i HOME=... PATH=...`.
+
+The existing crontab was backed up to `~/backups/crontab.bak.<UTC>` before
+either edit, and the install refused to proceed unless the backup was
+non-empty and contained the known reconciler line. Both prior entries
+verified intact afterwards.
+
+Verified end to end: the exact crontab command run under a cron-like
+environment exited 0 and wrote
+`Tue Sep 29 10:48:50 UTC 2026 revoked_tokens: 0 rows before, 0 pruned, 0 remain.`
+The first scheduled run is 04:07 UTC tomorrow.
