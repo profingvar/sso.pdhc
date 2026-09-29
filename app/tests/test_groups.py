@@ -445,3 +445,60 @@ class TestJoinByInvite:
                            headers=_auth_header(reg_token),
                            json={'token': invite_token2})
         assert resp.status_code == 409
+
+
+# --- #709: the org-less professional must keep the path to an org ---
+
+class TestOrgLessProfessionalKeepsTheRoute:
+    """Pins the reason `require_organisation` was removed rather than applied.
+
+    The #704 triage found a complete "professional must hold at least one
+    organisation membership" decorator applied to no route, and asked whether
+    an intended rule was going unenforced. It was not: the only routes it
+    would fit are the four that a professional uses to GET a membership, and
+    gating those on already having one is a permanent lockout.
+
+    These assertions are the shape of that argument. If someone reintroduces
+    the decorator on the group routes, they fail.
+    """
+
+    def _orgless_token(self, client, seed_data, app):
+        from src.db import get_session
+        from src.models.user_organisation import UserOrganisation
+        with app.app_context():
+            session = get_session()
+            assert session.query(UserOrganisation).filter_by(
+                user_guid=seed_data['reg_guid']).first() is None, \
+                'the seeded regular professional is meant to hold no org'
+            session.close()
+        return _get_token(client, 'regular@test.com', 'regpass12')
+
+    def test_they_can_see_the_groups_list(self, client, seed_data, app):
+        token = self._orgless_token(client, seed_data, app)
+        resp = client.get('/api/groups', headers=_auth_header(token))
+        assert resp.status_code == 200
+
+    def test_they_can_request_a_membership(self, client, seed_data, app):
+        """The route out of having no organisation. A 403 here is the bug."""
+        token = self._orgless_token(client, seed_data, app)
+        resp = client.post('/api/groups/request-membership',
+                           headers=_auth_header(token),
+                           json={'group_guid': seed_data['group_a_guid']})
+        assert resp.status_code == 201
+        assert resp.get_json()['status'] == 'pending'
+
+    def test_they_can_redeem_an_invite(self, client, seed_data, app):
+        """Same argument: an invite is how an org reaches someone who has
+        none. It may fail on the token, never on the missing membership."""
+        token = self._orgless_token(client, seed_data, app)
+        resp = client.post('/api/groups/join-by-invite',
+                           headers=_auth_header(token),
+                           json={'token': 'no-such-invite'})
+        assert resp.status_code in (400, 404)
+        body = resp.get_json() or {}
+        assert body.get('error') != 'organisation_required'
+
+    def test_the_decorator_is_gone(self):
+        """Named so a grep for the removal lands on the reasoning."""
+        from src.middleware import auth_middleware
+        assert not hasattr(auth_middleware, 'require_organisation')

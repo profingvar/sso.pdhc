@@ -97,26 +97,31 @@ def require_patient(f):
     return decorated
 
 
-def require_organisation(f):
-    """Require professional user has at least one organisation membership.
-    SU admins bypass this check."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        user = _get_current_user()
-        if user is None:
-            return jsonify({"error": "authentication_required", "message": "Valid Bearer token required"}), 401
-        if user.is_su_admin:
-            return f(*args, **kwargs)
-        if user.user_type != 'professional':
-            return f(*args, **kwargs)
-        from src.models.user_organisation import UserOrganisation
-        session = get_db()
-        has_org = session.query(UserOrganisation).filter_by(user_guid=user.guid).first()
-        if has_org is None:
-            return jsonify({"error": "organisation_required",
-                            "message": "Organisation membership required. Contact your administrator."}), 403
-        return f(*args, **kwargs)
-    return decorated
+# ── require_organisation: removed 2026-09-29 (#709). Do not re-add. ──
+#
+# There was a `require_organisation` decorator here — "a professional must
+# hold at least one organisation membership, SU admins bypass" — written
+# before 2026-03-24, deployed uncommitted, and swept into git by the #365
+# reconciliation. It was never applied to a route. The #704 triage flagged
+# it as a rule somebody intended that was simply not being enforced.
+#
+# It is the other way round. The only routes it would fit are the four
+# @require_professional ones in routes/groups.py, and every one of them is
+# how a professional OBTAINS a membership: list-groups, request-membership,
+# request-admin, join-by-invite. Gating those on already having one locks a
+# new professional out of the only path to getting one, permanently.
+# `tests/test_groups.py::TestRequestMembership` proves it — its "regular"
+# professional holds no UserOrganisation row and must succeed.
+#
+# The rule is enforced, just not at this door: the access blob carries
+# `organization_ids`, and every consuming service scopes its rows to it
+# (Rule 24), so an org-less professional sees nothing anywhere. The SU admin
+# console shows the state directly — a red "No org" badge with a "+ Org"
+# control beside it (templates/su_admin.html) — because the answer is an
+# administrator assigning an organisation, not a 403 at the user.
+#
+# If a future route genuinely needs "must already belong somewhere", write
+# it there against organization_ids rather than reviving this.
 
 
 def require_service_key(f):

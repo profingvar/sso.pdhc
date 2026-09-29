@@ -584,3 +584,45 @@ gotcha in memory before restarting).
 Deferred/notes: role EDIT (PUT) not surfaced in the registry card (create+delete
 only); affiliation is_admin flag still not sent by the S9 form; org is_external
 toggle stays API/Partners-panel only (create-org here is internal-only by design).
+
+## #709 — `require_organisation` removed, and why it must not come back (2026-09-29)
+
+The #704 triage found a complete auth decorator in
+`app/src/middleware/auth_middleware.py` — "a professional must hold at least
+one organisation membership, SU admins bypass" — applied to no route. It was
+written before 2026-03-24, deployed uncommitted, and swept into git by the
+#365 reconciliation (13adeb4), so there is no ticket and no author's note
+recording what it was for.
+
+The triage asked whether a rule somebody intended was going unenforced.
+**It is the other way round: applying it would have been a bug.**
+
+The only routes it fits are the four `@require_professional` ones in
+`routes/groups.py`, and every one of them is how a professional *obtains* a
+membership — `GET /api/groups`, `request-membership`, `request-admin`,
+`join-by-invite`. Gating those on already holding one is a permanent lockout
+for every new professional. `tests/test_groups.py::TestRequestMembership`
+already proves it: its "regular" professional holds no `UserOrganisation`
+row and must get a 201.
+
+The rule *is* enforced, just not at this door. The access blob carries
+`organization_ids` and every consuming service scopes its rows to it
+(Rule 24), so an org-less professional sees nothing anywhere. The SU console
+shows the state directly — a red "No org" badge beside a "+ Org" control in
+`templates/su_admin.html` — because the intended answer is an administrator
+assigning an organisation, not a 403 at the user.
+
+**Changed.** The decorator is gone; a comment block stands in its place
+carrying the whole argument, so the next person to notice the gap reads the
+reasoning instead of re-adding it. Four tests
+(`TestOrgLessProfessionalKeepsTheRoute`) fail if it returns, including one
+that asserts the attribute no longer exists.
+
+333 tests pass.
+
+**Not deployed.** This removes dead code and changes no behaviour, and
+rebuilding `sso_app` is the highest-blast-radius restart on the platform —
+every service validates every request against it. It rides along with the
+next sso deploy. Prod disk is therefore one no-op behind git for
+`auth_middleware.py`; that is git-ahead, not the prod-ahead divergence
+pattern that silently reverts on a pull.

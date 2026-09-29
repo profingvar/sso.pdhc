@@ -405,3 +405,8 @@ All edited files listed with full path (Rule 17).
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_frontend.py
   (added test_admin_create_care_unit_under_caregiver + test_admin_set_org_parent_reparents)
 - app/src/routes/auth.py — /me/service service-credential compare now hmac.compare_digest (was !=, timing side-channel on the SSO client secret; the endpoint every service calls). Deployed + live-verified (200/403/403).
+
+## 2026-09-29 — #709 require_organisation removed (#704 triage, item 2)
+| 2026-09-29 | app/src/middleware/auth_middleware.py | `require_organisation` removed; reasoning left in its place |
+| 2026-09-29 | app/tests/test_groups.py | `TestOrgLessProfessionalKeepsTheRoute` — 4 tests that fail if it returns |
+| 2026-09-29 | progress.md | this entry |
