@@ -680,3 +680,47 @@ a clean no-op.
    ```
    Not installed — a cron entry is a standing change to server state and is
    the operator's call (§15).
+
+## DEPLOYED 2026-09-29 — #707 removal + #704 pruner, one rebuild
+
+Both changes that were waiting for a deliberate sso rebuild are now live.
+
+**Divergence check first.** sso.pdhc's prod directory is not a git checkout,
+so rather than trusting the three files being changed, all 52 `.py` files
+under `app/src` + `app/scripts` were hashed against the pre-change baseline
+(67dca5a). **Prod matched exactly — no server-side drift**, which also
+confirmed c696b6e (constant-time `/me/service` compare) was already live.
+
+**Deploy.** Predeploy tar + the rollback image id recorded at
+`~/backups/predeploy/sso.pdhc/20260929T104223Z_*`; rollback image
+`sha256:fa791ff6…`. Files copied, `py_compile`d, then
+`docker-compose up -d --build` from `/usr/local/www/sso.pdhc/app`. Not
+`safe_restart.sh` — its `PORTS=(9000-9003)` kill -9 takes out the host side
+of Colima's `sso_db` forward — and not `docker restart`, which keeps
+create-time env.
+
+**Verified in the new container:** `require_organisation` absent (0), the
+removal note present (1), `count_expired_tokens` present (1),
+`scripts/prune_tokens.py` shipped (1). Clean gunicorn boot, no errors.
+Platform container health identical before and after: 25 healthy, 0
+unhealthy, 43 total. `sso.pdhc.se/api/health` 200 in 30 ms, and gateway,
+request and onboard all still 200.
+
+**First prune.** Dry run reported **64 rows, 64 expired, 0 still doing
+work** — so the delete could not affect any live token. Pruned all 64; a
+second dry run reported 0. sso healthy throughout.
+
+Worth stating plainly: 64 rows is small. The finding was right in kind —
+nothing had ever pruned the table and it grew without bound — but the rate
+is roughly one row per logout, so it was years from being a problem rather
+than months. It sits on the hot path, which is why it is worth closing, not
+because the table was large.
+
+### Still outstanding
+
+The cron entry is **not** installed. Daily is ample:
+```
+7 4 * * *  /opt/homebrew/bin/docker exec sso_app python scripts/prune_tokens.py >> ~/logs/prune_tokens.log 2>&1
+```
+A standing cron entry is a change to server state and the operator's call.
+Until it exists, the table grows again from zero.
