@@ -629,3 +629,54 @@ every service validates every request against it. It rides along with the
 next sso deploy. Prod disk is therefore one no-op behind git for
 `auth_middleware.py`; that is git-ahead, not the prod-ahead divergence
 pattern that silently reverts on a pull.
+
+## #704 item 1 — `revoked_tokens` had a pruner and no caller (2026-09-29)
+
+`POST /api/auth/logout` inserts a row into `revoked_tokens` on every logout.
+`prune_expired_tokens` in `src/services/jwt_service.py` was written and
+correct; nothing called it. The table had been growing since March.
+
+It matters more than the row count suggests: `validate_token` queries this
+table **on every request on every service**. CLAUDE.md §11 forbids caching
+the access blob, so each service revalidates against sso.pdhc every time,
+and each revalidation reads here. This is the platform's hot path.
+
+**A row is dead the moment it expires.** It exists to make `validate_token`
+reject a token *before* the token's own `exp`. Once `exp` has passed,
+`decode_token` raises `TokenExpiredError` before the revocation check is
+reached, so the row can no longer change any answer. No grace margin is
+needed either: `expires_at` is written from the token's own `exp` and
+compared against the same process's clock, so no database clock is involved
+and there is nothing to skew. `test_a_pruned_row_cannot_un_revoke_a_live_token`
+pins that argument.
+
+**Added**
+- `count_expired_tokens(session)` — read-only, so `--dry-run` is safe to
+  point at production.
+- `prune_expired_tokens` now returns the number deleted (and still does not
+  commit — the caller owns the transaction, matching `revoke_token`).
+- `app/scripts/prune_tokens.py` — the caller, in the same standalone-script
+  idiom as `create_su.py` and `init_db.py`, since sso.pdhc has no Flask CLI.
+
+Verified against a scratch sqlite database: 3 expired + 1 live →
+`--dry-run` reported "4 rows, 3 expired (1 still doing work). Nothing
+changed", the real run pruned 3 and kept the live one, and a second run was
+a clean no-op.
+
+### Still to do — operator steps, not done here
+
+1. **Deploy.** This ships with the #707 `require_organisation` removal; both
+   are waiting on one sso rebuild. Nothing prunes until the script is on the
+   server.
+2. **First run, dry.** Read the count before deleting anything — the table
+   has never been pruned, so the number is the interesting part:
+   ```
+   docker exec sso_app python scripts/prune_tokens.py --dry-run
+   ```
+3. **Cron**, alongside request.pdhc's consent reconciler. Daily is ample;
+   the rows are small and nothing depends on prompt removal:
+   ```
+   7 4 * * *  /opt/homebrew/bin/docker exec sso_app python scripts/prune_tokens.py >> ~/logs/prune_tokens.log 2>&1
+   ```
+   Not installed — a cron entry is a standing change to server state and is
+   the operator's call (§15).

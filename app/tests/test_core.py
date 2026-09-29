@@ -272,3 +272,76 @@ class TestHealthEndpoint:
         data = response.get_json()
         assert data['status'] == 'ok'
         assert 'uptime_seconds' in data
+
+
+# --- #704: revoked_tokens had no pruner with a caller ---
+
+class TestPruningRevokedTokens:
+    """`prune_expired_tokens` existed, was correct, and nothing called it.
+
+    Every logout inserts a row here and `validate_token` reads the table on
+    every request on every service (§11 forbids caching the access blob), so
+    it is on the platform's hot path and had grown unbounded since March.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_table(self, db_session):
+        """Sibling tests in this module leave revoked rows behind; these
+        assertions are about counts, so start from a known table."""
+        db_session.query(RevokedToken).delete()
+        db_session.commit()
+
+    def _row(self, db_session, guid, hours):
+        from datetime import datetime, timedelta, timezone
+        rt = RevokedToken(
+            token_guid=guid,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=hours),
+        )
+        db_session.add(rt)
+        db_session.commit()
+        return rt
+
+    def test_it_removes_expired_rows_and_reports_how_many(self, db_session):
+        from src.services.jwt_service import prune_expired_tokens
+        self._row(db_session, 'gone-1', -2)
+        self._row(db_session, 'gone-2', -1)
+        removed = prune_expired_tokens(db_session)
+        db_session.commit()
+        assert removed == 2
+        assert db_session.query(RevokedToken).count() == 0
+
+    def test_it_leaves_rows_that_are_still_doing_work(self, db_session):
+        """A row before its exp is the only thing stopping a live token."""
+        from src.services.jwt_service import prune_expired_tokens
+        self._row(db_session, 'gone-1', -1)
+        self._row(db_session, 'keep-1', +1)
+        prune_expired_tokens(db_session)
+        db_session.commit()
+        remaining = [r.token_guid for r in db_session.query(RevokedToken).all()]
+        assert remaining == ['keep-1']
+
+    def test_a_pruned_row_cannot_un_revoke_a_live_token(self, db_session):
+        """The safety argument for pruning at exp with no grace margin:
+        once exp has passed, decode_token raises before the revocation
+        check is ever reached, so the row can no longer change an answer."""
+        from src.services.jwt_service import prune_expired_tokens
+        token = issue_token('user-prune-1', SECRET, expiry_hours=1)
+        payload = decode_token(token, SECRET)
+        self._row(db_session, payload['jti'], +1)
+
+        prune_expired_tokens(db_session)      # not yet expired
+        db_session.commit()
+        with pytest.raises(TokenRevokedError):
+            validate_token(token, SECRET, db_session)
+
+    def test_counting_changes_nothing(self, db_session):
+        """--dry-run has to be safe to run against production."""
+        from src.services.jwt_service import count_expired_tokens
+        self._row(db_session, 'gone-1', -1)
+        self._row(db_session, 'keep-1', +1)
+        assert count_expired_tokens(db_session) == 1
+        assert db_session.query(RevokedToken).count() == 2
+
+    def test_pruning_an_empty_table_is_a_no_op(self, db_session):
+        from src.services.jwt_service import prune_expired_tokens
+        assert prune_expired_tokens(db_session) == 0

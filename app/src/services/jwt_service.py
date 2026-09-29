@@ -97,8 +97,34 @@ def revoke_token(token_guid, expires_at, session):
     session.add(revoked)
 
 
-def prune_expired_tokens(session):
-    """Remove revoked tokens that have passed their expiry."""
+def count_expired_tokens(session):
+    """How many rows `prune_expired_tokens` would remove. Read-only."""
     from src.models.revoked_token import RevokedToken
     now = datetime.now(timezone.utc)
-    session.query(RevokedToken).filter(RevokedToken.expires_at < now).delete()
+    return session.query(RevokedToken).filter(
+        RevokedToken.expires_at < now).count()
+
+
+def prune_expired_tokens(session):
+    """Remove revoked tokens that have passed their expiry. Returns the count.
+
+    A row here exists to make `validate_token` reject a token before its own
+    `exp`. Once that `exp` has passed, `decode_token` raises
+    TokenExpiredError before the revocation check is ever reached, so the row
+    can no longer change any answer — it is dead weight the moment it expires.
+    No grace margin is needed: `expires_at` is written from the token's own
+    `exp` and compared against the same process's clock, so no database clock
+    is involved and there is nothing to skew.
+
+    That matters more than the row count suggests. Every logout inserts here,
+    nothing removed anything until #704, and `validate_token` queries this
+    table on every request on every service — CLAUDE.md §11 forbids caching
+    the access blob, so each one revalidates. The table is on the platform's
+    hot path and had been growing since March.
+
+    Does not commit; the caller owns the transaction, matching `revoke_token`.
+    """
+    from src.models.revoked_token import RevokedToken
+    now = datetime.now(timezone.utc)
+    return session.query(RevokedToken).filter(
+        RevokedToken.expires_at < now).delete(synchronize_session=False)

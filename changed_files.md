@@ -410,3 +410,9 @@ All edited files listed with full path (Rule 17).
 | 2026-09-29 | app/src/middleware/auth_middleware.py | `require_organisation` removed; reasoning left in its place |
 | 2026-09-29 | app/tests/test_groups.py | `TestOrgLessProfessionalKeepsTheRoute` — 4 tests that fail if it returns |
 | 2026-09-29 | progress.md | this entry |
+
+## 2026-09-29 — #704 item 1: revoked_tokens was never pruned
+| 2026-09-29 | app/src/services/jwt_service.py | `prune_expired_tokens` returns a count; `count_expired_tokens` added |
+| 2026-09-29 | app/scripts/prune_tokens.py | NEW — the caller, with `--dry-run` |
+| 2026-09-29 | app/tests/test_core.py | `TestPruningRevokedTokens` — 5 tests |
+| 2026-09-29 | progress.md | this entry |
