@@ -11,7 +11,7 @@ import re
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, session, g, current_app, send_from_directory, abort,
-    jsonify,
+    jsonify, Response,
 )
 
 from src.db import get_db
@@ -21,6 +21,48 @@ from src.services.auth_service import authenticate_user, hash_password, verify_p
 from src.services.audit_log import audit
 
 frontend_bp = Blueprint('frontend', __name__, template_folder='../templates')
+
+
+# ---------------------------------------------------------------------------
+# #784 B1/B3 — the person-registry CSV contract, in ONE place.
+#
+# Export writes these columns, the importer reads them, and the "Show template"
+# panel in su_admin.html documents them. Before this the three disagreed: the
+# API export emitted `user_guid` first and `professional_role` seventh, while
+# the importer keyed on names and silently ignored anything it did not
+# recognise -- so a round-trip looked like it worked and quietly dropped
+# fields. Keeping the contract here means a column cannot be added to one half
+# of the feature without the other half and the help text following.
+#
+# `required` is what the importer insists on; `ignored_on_import` marks the
+# columns that exist so an export can be read by a human, not fed back.
+# ---------------------------------------------------------------------------
+
+USER_CSV_COLUMNS = [
+    {'name': 'email', 'required': True,
+     'help': 'Unique. A row whose email already exists is skipped, not updated.'},
+    {'name': 'user_type', 'required': False,
+     'help': "professional or patient. Defaults to professional when blank."},
+    {'name': 'is_su_admin', 'required': False,
+     'help': "true grants super-admin. Anything else, including blank, is false."},
+    {'name': 'professional_role', 'required': False,
+     'help': 'Only read for professionals. Defaults to "other".'},
+    {'name': 'first_name', 'required': False, 'help': 'Professionals only.'},
+    {'name': 'last_name', 'required': False, 'help': 'Professionals only.'},
+    {'name': 'user_guid', 'required': False, 'ignored_on_import': True,
+     'help': 'Written by export for reference. IGNORED on import — the server '
+             'always assigns a fresh guid.'},
+    {'name': 'created_at', 'required': False, 'ignored_on_import': True,
+     'help': 'Written by export for reference. IGNORED on import.'},
+]
+
+EXPORT_COLUMNS = [c['name'] for c in USER_CSV_COLUMNS]
+
+# Every imported account gets this password and must change it at first login.
+# Stated in the UI because an SU importing 200 people needs to know that they
+# all share a password until they log in.
+IMPORT_DEFAULT_PASSWORD = 'changeme01'
+
 
 
 # ---------------------------------------------------------------------------
@@ -166,13 +208,16 @@ def _require_group_admin_login(f):
 
 @frontend_bp.route('/')
 def landing():
-    """Landing page with service list from oath_overview.csv."""
-    services = []
-    oath_path = os.path.join(current_app.root_path, '..', 'oath_overview.csv')
-    if os.path.exists(oath_path):
-        with open(oath_path, 'r') as f:
-            services = list(csv.DictReader(f))
-    return render_template('landing.html', services=services)
+    """Landing page: login, patient registration, professional access request.
+
+    #784 A3: this used to read oath_overview.csv and pass a `services` list to
+    the template, which rendered a platform service inventory with live health
+    dots. Both the table and the card grid were removed -- a service inventory
+    belongs to www.pdhc.se/services.html, which the PDHC button in the nav
+    ribbon now reaches. The CSV read goes with them rather than being left to
+    load a file nothing renders.
+    """
+    return render_template('landing.html')
 
 
 # ---------------------------------------------------------------------------
@@ -449,23 +494,66 @@ def admin_page():
         'user_guid': lr.user_guid, 'group_guid': lr.group_guid,
     } for lr in lr_list]
 
+    # #784 C1: the Organisations panel was a flat list whose hierarchy survived
+    # only as a "↳ parent" annotation in a shared "Kind / Parent" column, which
+    # is what made it hard to read. Group it here instead: each vårdgivare
+    # (care organisation) carries its own vårdenheter (care units), and
+    # externals -- which are deliberately NOT part of the care hierarchy --
+    # stand apart.
+    #
+    # The distinction matters beyond layout: a vårdenhet is the spärrgräns, the
+    # boundary a patient's block applies across, so "which unit" is a legal
+    # question and not an organisational nicety.
+    _by_guid = {o['organisation_guid']: o for o in organisations}
+    _units_of = {}
+    for o in organisations:
+        if o['kind'] == 'care_unit':
+            _units_of.setdefault(o['parent_caregiver_guid'], []).append(o)
+    org_tree = {
+        'caregivers': [
+            {**o, 'units': sorted(_units_of.get(o['organisation_guid'], []),
+                                  key=lambda u: (u['name'] or '').lower())}
+            for o in sorted(organisations, key=lambda x: (x['name'] or '').lower())
+            if o['kind'] == 'care_organisation'
+        ],
+        'external': [o for o in sorted(organisations,
+                                       key=lambda x: (x['name'] or '').lower())
+                     if o['kind'] == 'external'],
+        # A unit whose parent guid resolves to nothing would otherwise vanish
+        # from a grouped view entirely. Surface it rather than hide it.
+        'orphaned_units': [o for o in organisations
+                           if o['kind'] == 'care_unit'
+                           and o['parent_caregiver_guid'] not in _by_guid],
+    }
+
     # Groups
     all_groups = db.query(Group).all()
     groups_list = [{'guid': g.guid, 'name': g.name, 'category': g.category} for g in all_groups]
 
-    # Oath overview
-    oath_overview = []
-    oath_path = os.path.join(current_app.root_path, '..', 'oath_overview.csv')
-    if os.path.exists(oath_path):
-        with open(oath_path, 'r') as f:
-            oath_overview = list(csv.DictReader(f))
+    # #784 D2: the Service Registry card that consumed oath_overview.csv was
+    # removed from su_admin.html, together with the health-dot CSS and the
+    # poller that hit /api/service-health on load and every 30 minutes. The CSV
+    # read is removed here for the same reason.
 
     return render_template('su_admin.html',
                            users=users, organisations=organisations,
                            access_requests=access_requests,
                            group_proposals=group_proposals,
                            leader_requests=leader_requests,
-                           groups=groups_list, oath_overview=oath_overview,
+                           groups=groups_list,
+                           # #784 B5: guid -> name, so the Person Registry can
+                           # show the organisation by name. The template used
+                           # to resolve this with `{% set %}` inside a nested
+                           # `{% for %}`; Jinja2 scopes such an assignment to
+                           # the loop iteration, so the variable was ALWAYS
+                           # empty on the way out and the cell always fell back
+                           # to the truncated guid. Verified against jinja2
+                           # 3.1.6 before changing it. A dict also replaces an
+                           # O(users x orgs) scan with a lookup.
+                           org_names=_org_name,
+                           org_tree=org_tree,
+                           user_csv_columns=USER_CSV_COLUMNS,
+                           import_default_password=IMPORT_DEFAULT_PASSWORD,
                            phase_names=list(PHASE_NAMES))
 
 
@@ -1088,6 +1176,85 @@ def admin_delete_group():
     return redirect(url_for('frontend.admin_page'))
 
 
+@frontend_bp.route('/admin/export-users', methods=['GET'])
+@_require_su_login
+def admin_export_users():
+    """GET /admin/export-users — CSV export of users, for a browser click.
+
+    #784 B1. An API twin of this already existed at
+    /api/admin/export-users, and the admin page linked straight to it with
+    <a href=... target="_blank">. That route is @require_auth, and
+    require_auth accepts ONLY an `Authorization: Bearer` header
+    (middleware/auth_middleware.py::_get_current_user). A browser following a
+    link sends the session cookie and no bearer token, so the new tab showed
+    `401 authentication_required` -- which is what "Export CSV does not work"
+    was.
+
+    Import never had this problem because it already had a session twin here
+    (admin_import_users below). Export simply never got one. Both halves of the
+    feature now authenticate the same way, so neither can rot while the other
+    works.
+
+    The column order deliberately matches what admin_import_users accepts, so
+    an export can be edited and fed straight back in. Two of the columns are
+    informational on the way back: `user_guid` and `created_at` are IGNORED by
+    the importer, which assigns a fresh guid.
+    """
+    db = get_db()
+    from src.models.user import User
+    from src.models.professional import Professional
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(EXPORT_COLUMNS)
+
+    for u in db.query(User).order_by(User.email).all():
+        first_name, last_name, role = '', '', ''
+        if u.user_type == 'professional':
+            prof = db.query(Professional).filter_by(user_id=u.id).first()
+            if prof:
+                first_name = prof.first_name or ''
+                last_name = prof.last_name or ''
+                role = prof.professional_role or ''
+        writer.writerow([
+            u.email, u.user_type, 'true' if u.is_su_admin else 'false',
+            role, first_name, last_name,
+            u.guid, u.created_at.isoformat() if u.created_at else '',
+        ])
+
+    audit('export_users', user_guid=_get_session_user().guid,
+          detail={'rows': db.query(User).count()}, ip=request.remote_addr)
+    return Response(
+        out.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=pdhc_users.csv'},
+    )
+
+
+@frontend_bp.route('/admin/users-csv-template', methods=['GET'])
+@_require_su_login
+def admin_users_csv_template():
+    """GET /admin/users-csv-template — an empty CSV with the right header row.
+
+    #784 B3. "Import CSV must have a template" — this is that template, served
+    from the same USER_CSV_COLUMNS contract the importer and the export use, so
+    it cannot drift from what the importer actually reads. One example row is
+    included and commented out is not an option in CSV, so the example uses an
+    obviously-fake address that the importer would accept.
+    """
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(EXPORT_COLUMNS)
+    writer.writerow(['anna.exempel@example.org', 'professional', 'false',
+                     'doctor', 'Anna', 'Exempel', '', ''])
+    return Response(
+        out.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition':
+                 'attachment; filename=pdhc_users_template.csv'},
+    )
+
+
 @frontend_bp.route('/admin/import-users', methods=['POST'])
 @_require_su_login
 def admin_import_users():
@@ -1115,8 +1282,17 @@ def admin_import_users():
             skipped += 1
             continue
         user_type = row.get('user_type', 'professional')
-        new_user = User(email=email, password_hash=hash_password('changeme01'),
+        # #784 B3: every imported account shares IMPORT_DEFAULT_PASSWORD, which
+        # is stated in the Show-template panel. It is only safe to say that
+        # because the account is now forced to change it at first login --
+        # before this, `force_change_on_next_login` was left False and an
+        # imported cohort kept a known shared password indefinitely. The gate
+        # that enforces it already existed (_force_password_change_gate);
+        # import was simply not setting the flag that triggers it.
+        new_user = User(email=email,
+                        password_hash=hash_password(IMPORT_DEFAULT_PASSWORD),
                         user_type=user_type,
+                        force_change_on_next_login=True,
                         is_su_admin=row.get('is_su_admin', '').lower() == 'true')
         db.add(new_user)
         db.flush()

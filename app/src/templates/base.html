@@ -51,6 +51,10 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         nav .brand { font-weight: 700; font-size: 1.1rem; text-decoration: none; color: white; }
+        nav .brand-group { display: flex; align-items: center; gap: 0.6rem; }
+        nav .brand-platform { opacity: 0.75; font-size: 0.85em; }
+        nav .brand-platform:hover { opacity: 1; }
+        nav .brand-sep { color: rgba(255,255,255,0.3); }
         nav .nav-links { display: flex; gap: 1rem; align-items: center; }
         nav .nav-links a {
             color: rgba(255,255,255,0.9);
@@ -221,7 +225,19 @@
 </head>
 <body>
     <nav>
-        <a href="/" class="brand">sso.pdhc</a>
+        {#
+          #784 A1/A2: the platform-standard nav ribbon. PDHC on the left links
+          out to the platform; the service's own name is the SECOND button and
+          links to this service's home. Copied verbatim from the 8 siblings that
+          already carry it (request, plan, ips, cdr, cgm, 1177, provider,
+          gateway) -- sso.pdhc was one of the services that never adopted it.
+          It lives in base.html, so it applies to every page of sso.pdhc.
+        #}
+        <div class="brand-group">
+            <a href="https://www.pdhc.se/services.html" class="brand brand-platform">PDHC</a>
+            <span class="brand-sep">/</span>
+            <a href="/" class="brand">sso.pdhc</a>
+        </div>
         <div class="nav-links">
             {% if current_user %}
                 <a href="/dashboard">Dashboard</a>

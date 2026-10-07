@@ -416,3 +416,11 @@ All edited files listed with full path (Rule 17).
 | 2026-09-29 | app/scripts/prune_tokens.py | NEW — the caller, with `--dry-run` |
 | 2026-09-29 | app/tests/test_core.py | `TestPruningRevokedTokens` — 5 tests |
 | 2026-09-29 | progress.md | this entry |
+
+## 2026-10-07 — #784 SSO reform: landing page, person registry, org hierarchy
+| 2026-10-07 | app/src/templates/base.html | platform-standard nav ribbon (PDHC / sso.pdhc), on every page |
+| 2026-10-07 | app/src/templates/landing.html | service inventory + health probe removed; two cards retitled |
+| 2026-10-07 | app/src/templates/su_admin.html | packed Person column; org by name; CSV template panel; org hierarchy; Documentation + Service Registry panes removed; registries explained |
+| 2026-10-07 | app/src/routes/frontend.py | `USER_CSV_COLUMNS` contract; session-auth `/admin/export-users`; `/admin/users-csv-template`; import forces password change; `org_names` + `org_tree`; dead `oath_overview.csv` reads removed |
+| 2026-10-07 | app/tests/test_frontend.py | landing assertions inverted — the two sections must now be ABSENT |
+| 2026-10-07 | app/tests/test_sso_reform_784.py | NEW — 24 tests; 22 fail without the fix |

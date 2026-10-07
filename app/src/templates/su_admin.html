@@ -1,29 +1,145 @@
 {% extends "base.html" %}
 {% block title %}SU Admin — sso.pdhc{% endblock %}
 {% block container_class %}container-wide{% endblock %}
+
+{% block extra_head %}
+<style>
+/* --- #784 B1-B4: person registry --------------------------------------- */
+.csv-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.csv-import { display: inline-flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; }
+.csv-label { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; }
+.csv-import input[type="file"] { font-size: 0.78rem; max-width: 100%; }
+
+.csv-help {
+    margin: 0.5rem 0 1rem; padding: 0.75rem 1rem;
+    border: 1px solid var(--border); border-left: 3px solid var(--primary);
+    border-radius: 6px; background: #f9fafb;
+}
+.csv-help-head { display: flex; align-items: center; justify-content: space-between;
+                 gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.csv-help-table { font-size: 0.8rem; }
+.csv-help-table td, .csv-help-table th { padding: 0.3rem 0.5rem; }
+.csv-help-table tr.csv-ignored { opacity: 0.6; }
+.csv-help-note { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem; }
+
+/* The packed Person cell: one value per line, tightened so five stacked
+   values are no taller than the row of controls beside them. */
+.person-cell { line-height: 1.35; min-width: 190px; }
+.person-cell .person-name { font-weight: 600; }
+.person-cell .person-email { font-size: 0.82rem; color: var(--text-muted); word-break: break-all; }
+.person-cell .person-meta { display: flex; flex-wrap: wrap; gap: 0.35rem;
+                            align-items: center; font-size: 0.78rem;
+                            color: var(--text-muted); margin-top: 0.15rem; }
+.person-cell .person-guid { display: inline-block; margin-top: 0.15rem;
+                            font-size: 0.7rem; color: #6b7280; cursor: pointer; }
+.person-cell .person-guid.copied { background: #dcfce7; }
+
+.org-chip { display: inline-flex; align-items: center; gap: 2px;
+            background: #e5e7eb; border-radius: 4px; padding: 1px 6px;
+            font-size: 0.75rem; margin: 1px 0; }
+.org-chip-x { background: none; border: none; color: var(--danger);
+              cursor: pointer; font-size: 0.8rem; padding: 0 2px; line-height: 1; }
+.no-org { color: var(--danger); font-size: 0.75rem; font-weight: 600; }
+
+/* --- #784 C1: organisation hierarchy ----------------------------------- */
+.org-table tr.org-caregiver > td { border-top: 2px solid var(--border); }
+.org-table tr.org-caregiver { background: #f8fafc; }
+.org-table tr.org-unit > td:first-child { padding-left: 1.75rem; }
+.org-table tr.org-unit-empty > td { padding-left: 1.75rem; }
+.org-tree-stem { color: #94a3b8; margin-right: 0.3rem; }
+.org-unit-count { font-size: 0.75rem; color: var(--text-muted); margin-left: 0.4rem; }
+.org-badge-cg   { background: #dbeafe; color: #1e40af; }
+.org-badge-unit { background: #dcfce7; color: #166534; }
+.org-badge-ext  { background: #ede9fe; color: #5b21b6; }
+.org-section-row > td { background: #f1f5f9; border-top: 2px solid var(--border); }
+.org-reparent { display: inline-flex; gap: 2px; align-items: center; margin-left: 0.4rem; }
+.org-reparent select { font-size: 0.68rem; padding: 1px 3px; max-width: 150px; }
+.org-reparent .btn { padding: 1px 5px; font-size: 0.68rem; }
+
+/* --- #784 E1: registries explanation ----------------------------------- */
+.reg-explain { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem; }
+.reg-explain p { margin-bottom: 0.5rem; max-width: 78ch; }
+.reg-explain strong { color: var(--text); }
+.reg-explain-note { font-size: 0.8rem; font-style: italic; }
+
+@media (max-width: 768px) {
+    .org-table tr.org-unit > td:first-child { padding-left: 0.9rem; }
+    .person-cell { min-width: 0; }
+}
+</style>
+{% endblock %}
 {% block content %}
 <h2 class="mb-2">SU Admin Panel</h2>
 
-<!-- Person Registry -->
+<!-- Person Registry (#784 B1-B6) -->
 <div class="card">
     <h3>Person Registry ({{ users | length }})</h3>
-    <div class="mb-1">
-        <a href="/api/admin/export-users" class="btn btn-sm btn-secondary" target="_blank">Export CSV</a>
-        <form method="post" action="/admin/import-users" enctype="multipart/form-data" style="display:inline-block;">
+
+    <div class="csv-bar mb-1">
+        {#
+          #784 B1: this used to link /api/admin/export-users, which is
+          @require_auth and reads ONLY an Authorization: Bearer header. A
+          browser click sends a cookie, so the new tab showed
+          401 authentication_required -- that was the "Export CSV does not
+          work". It now points at the session-authenticated twin, the same way
+          Import always has.
+        #}
+        <a href="/admin/export-users" class="btn btn-sm btn-secondary"
+           title="Download every person in this registry as a CSV file. Opens a download; nothing is changed.">Export CSV</a>
+
+        <button type="button" class="btn btn-sm btn-secondary"
+                onclick="document.getElementById('csv-help').hidden = !document.getElementById('csv-help').hidden"
+                title="Show which columns an import CSV must contain, and download an empty template.">Show template</button>
+
+        <form method="post" action="/admin/import-users" enctype="multipart/form-data" class="csv-import">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="file" name="file" accept=".csv" required style="font-size:0.8rem;">
-            <button type="submit" class="btn btn-sm btn-secondary">Import CSV</button>
+            {# #784 B2: "Choose file" alone never said what file. #}
+            <label for="import-file" class="csv-label">CSV file of people to add:</label>
+            <input type="file" id="import-file" name="file" accept=".csv" required
+                   title="A .csv file whose first row is the header. Use Show template for the exact columns.">
+            <button type="submit" class="btn btn-sm btn-secondary"
+                    title="Create an account for every row whose email is not already registered. Existing emails are skipped, never overwritten.">Import CSV</button>
         </form>
     </div>
+
+    <!-- #784 B3: the import template, documented from the same contract the
+         importer reads (frontend.py::USER_CSV_COLUMNS), so it cannot drift. -->
+    <div id="csv-help" hidden class="csv-help">
+        <div class="csv-help-head">
+            <strong>Import CSV format</strong>
+            <a href="/admin/users-csv-template" class="btn btn-sm btn-primary"
+               title="Download an empty CSV with the correct header row and one example row.">Download template</a>
+        </div>
+        <table class="csv-help-table">
+            <thead><tr><th>Column</th><th>Required</th><th>Meaning</th></tr></thead>
+            <tbody>
+            {% for c in user_csv_columns %}
+                <tr{% if c.get('ignored_on_import') %} class="csv-ignored"{% endif %}>
+                    <td><code>{{ c.name }}</code></td>
+                    <td>{% if c.required %}<strong>yes</strong>{% else %}no{% endif %}</td>
+                    <td>{{ c.help }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="csv-help-note">
+            Header row required; column order does not matter and unknown columns
+            are ignored. A row whose <code>email</code> already exists is
+            <strong>skipped, not updated</strong> &mdash; import adds people, it
+            never edits them. Every imported account is created with the password
+            <code>{{ import_default_password }}</code> and must choose a new one at
+            first login.
+        </p>
+    </div>
+
     <div style="overflow-x:auto;">
     <table>
         <thead>
             <tr>
-                <th>GUID</th>
-                <th>Email</th>
-                <th>Type</th>
-                <th>Name</th>
-                <th>Role / Personnr</th>
+                {# #784 B4: GUID, email, type, name and role were five columns
+                   of a ten-column table. They describe one person, so they are
+                   now one cell, one value per line. #}
+                <th>Person</th>
                 <th>Organisation</th>
                 <th>Phases</th>
                 <th>SU</th>
@@ -34,37 +150,55 @@
         <tbody>
         {% for u in users %}
             <tr>
-                <td><code style="font-size:0.7rem;">{{ u.user_guid[:8] }}...</code></td>
-                <td>{{ u.email }}</td>
-                <td><span class="badge badge-{{ u.user_type }}">{{ u.user_type }}</span></td>
-                <td>{{ u.first_name or '' }} {{ u.last_name or '' }}</td>
-                <td>{% if u.user_type == 'professional' %}{{ u.professional_role or '-' }}{% else %}{{ u.personnummer or '-' }}{% endif %}</td>
+                <td class="person-cell">
+                    <div class="person-name">
+                        {%- set full_name = ((u.first_name or '') ~ ' ' ~ (u.last_name or '')) | trim -%}
+                        {{ full_name or '(no name recorded)' }}
+                    </div>
+                    <div class="person-email">{{ u.email }}</div>
+                    <div class="person-meta">
+                        <span class="badge badge-{{ u.user_type }}">{{ u.user_type }}</span>
+                        {% if u.user_type == 'professional' %}
+                            <span title="Professional role">{{ u.professional_role or '— no role —' }}</span>
+                        {% else %}
+                            <span title="Personnummer">{{ u.personnummer or '— no personnummer —' }}</span>
+                        {% endif %}
+                    </div>
+                    <code class="person-guid" title="{{ u.user_guid }} — click to copy"
+                          onclick="navigator.clipboard && navigator.clipboard.writeText('{{ u.user_guid }}').then(function(){}, function(){});
+                                   this.classList.add('copied'); var el=this; setTimeout(function(){el.classList.remove('copied');}, 700);">{{ u.user_guid[:8] }}…</code>
+                </td>
                 <td>
                     {% if u.user_type == 'professional' %}
                         {% for org_id in u.organization_ids %}
-                            {% set org_name = '' %}
-                            {% for o in organisations %}
-                                {% if o.organisation_guid == org_id %}
-                                    {% set org_name = o.name %}
-                                {% endif %}
-                            {% endfor %}
-                            <span style="display:inline-flex;align-items:center;gap:2px;background:var(--badge-bg,#e5e7eb);border-radius:4px;padding:1px 6px;font-size:0.75rem;margin:1px 0;">
-                                {{ org_name or org_id[:8] }}
+                            {#
+                              #784 B5: the name used to be resolved with
+                              `{% set %}` inside a nested `{% for %}`. Jinja2
+                              scopes that assignment to the loop iteration, so
+                              the variable was always empty here and the cell
+                              ALWAYS rendered the truncated guid -- the code
+                              meant to show a name could never run. The route
+                              now passes an explicit guid -> name mapping.
+                            #}
+                            <span class="org-chip" title="{{ org_id }}">
+                                {{ org_names.get(org_id) or '(unknown org ' ~ org_id[:8] ~ '…)' }}
                                 <form method="post" action="/admin/remove-org" style="display:inline;margin:0;">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
                                     <input type="hidden" name="organisation_guid" value="{{ org_id }}">
-                                    <button type="submit" style="background:none;border:none;color:var(--danger,#c00);cursor:pointer;font-size:0.8rem;padding:0 2px;line-height:1;" title="Remove">&times;</button>
+                                    <button type="submit" class="org-chip-x"
+                                            title="Remove {{ org_names.get(org_id) or 'this organisation' }} from {{ u.email }}">&times;</button>
                                 </form>
                             </span>
                         {% endfor %}
                         {% if not u.organization_ids %}
-                            <span style="color:var(--danger,#c00);font-size:0.75rem;font-weight:600;">No org</span>
+                            <span class="no-org" title="This professional has no organisation, so org-scoped data (Rule 24) is empty for them.">No org</span>
                         {% endif %}
                         <form method="post" action="/admin/assign-org" style="display:inline-flex;gap:2px;align-items:center;margin-top:2px;">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
-                            <select name="organisation_guid" style="font-size:0.7rem;padding:1px 4px;max-width:120px;" required>
+                            <select name="organisation_guid" style="font-size:0.7rem;padding:1px 4px;max-width:130px;" required
+                                    title="Add an organisation affiliation for {{ u.email }}">
                                 <option value="">+ Org</option>
                                 {% for o in organisations %}
                                     {% if o.organisation_guid not in u.organization_ids %}
@@ -72,10 +206,11 @@
                                     {% endif %}
                                 {% endfor %}
                             </select>
-                            <button type="submit" class="btn btn-sm btn-secondary" style="padding:1px 6px;font-size:0.7rem;">Add</button>
+                            <button type="submit" class="btn btn-sm btn-secondary" style="padding:1px 6px;font-size:0.7rem;"
+                                    title="Assign the selected organisation">Add</button>
                         </form>
                     {% else %}
-                        -
+                        <span class="text-muted">—</span>
                     {% endif %}
                 </td>
                 <td>
@@ -127,7 +262,8 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
                         <input type="password" name="password" placeholder="Your password" style="width:100px;padding:2px 4px;font-size:0.75rem;" required>
-                        <button type="submit" class="btn btn-sm btn-primary">Promote SU</button>
+                        <button type="submit" class="btn btn-sm btn-primary"
+                                title="Make this person a super-admin: full access to every organisation and every admin action here. Requires YOUR password in the box to the left.">Promote SU</button>
                     </form>
                     {% endif %}
                     {% if u.user_guid != current_user.guid %}
@@ -138,7 +274,8 @@
                           onsubmit="return confirm('Reset password for {{ u.email }}? A temp password will be shown once after submit.');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
-                        <button type="submit" class="btn btn-sm btn-secondary">Reset pw</button>
+                        <button type="submit" class="btn btn-sm btn-secondary"
+                            title="Issue a temporary password, shown to you once after submit. The person is forced to choose a new one at next login. Their sessions stay valid until then.">Reset pw</button>
                     </form>
                     {# Ticket #44: bulk session flush. Bumps the user's
                        token_revocation_epoch so every outstanding JWT is
@@ -147,13 +284,15 @@
                           onsubmit="return confirm('Flush all sessions for {{ u.email }}? They will be logged out of every device immediately.');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
-                        <button type="submit" class="btn btn-sm btn-secondary">Flush</button>
+                        <button type="submit" class="btn btn-sm btn-secondary"
+                            title="Log this person out of every device immediately by invalidating all their issued tokens. Their password is unchanged.">Flush</button>
                     </form>
                     <form method="post" action="/admin/delete-user" style="display:inline;"
                           onsubmit="return confirm('Delete user {{ u.email }}?');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
-                        <button type="submit" class="btn btn-sm btn-danger">Del</button>
+                        <button type="submit" class="btn btn-sm btn-danger"
+                            title="Delete this person's account permanently. Data they produced elsewhere on the platform is not removed.">Del</button>
                     </form>
                     {% endif %}
                 </td>
@@ -203,92 +342,175 @@
     </div>
 </div>
 
-<!-- Organisations (S8 #410 care hierarchy: vårdgivare / vårdenhet) -->
+{#
+  #784 C1: the delete button and the re-parent control appear on several row
+  kinds in the grouped Organisations table. Defined once as macros so a change
+  to the guard or the confirm text applies to every row that shows them.
+#}
+{% macro org_delete_button(o) -%}
+    {% if o.patient_count > 0 %}
+        <button type="button" class="btn btn-sm btn-danger" disabled
+                title="Cannot delete — {{ o.patient_count }} patient(s) still reference this organisation. Move or remove them first.">Delete</button>
+    {% else %}
+    <form method="post" action="/admin/delete-organisation" style="display:inline;"
+          onsubmit="return confirm('Delete organisation &quot;{{ o.name }}&quot;?\n\n{{ o.user_assignment_count }} user assignment(s) and {{ o.access_request_count }} access request(s) will also be removed.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="organisation_guid" value="{{ o.organisation_guid }}">
+        <button type="submit" class="btn btn-sm btn-danger"
+                title="Delete {{ o.name }}. Blocked while any patient still references it.">Delete</button>
+    </form>
+    {% endif %}
+{%- endmacro %}
+
+{% macro org_reparent_form(u) -%}
+    <form method="post" action="/admin/set-org-parent" class="org-reparent">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="organisation_guid" value="{{ u.organisation_guid }}">
+        <select name="parent_caregiver_guid"
+                title="Move this vårdenhet under a different vårdgivare. Choosing — promotes it to a vårdgivare in its own right.">
+            <option value="">— promote to vårdgivare</option>
+            {% for c in org_tree.caregivers %}
+                {% if c.organisation_guid != u.organisation_guid %}
+                <option value="{{ c.organisation_guid }}" {% if c.organisation_guid == u.parent_caregiver_guid %}selected{% endif %}>{{ c.name }}</option>
+                {% endif %}
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-sm btn-secondary" title="Apply the move">Set</button>
+    </form>
+{%- endmacro %}
+
+<!-- Organisations — #784 C1: grouped by vårdgivare, not a flat list -->
 <div class="card">
     <h3>Organisations</h3>
-    <p class="text-muted" style="margin:0 0 0.5rem;font-size:0.82rem;">
-        Internal orgs form a 2-level care hierarchy: a <strong>Vårdgivare</strong>
-        (caregiver, top level) with <strong>Vårdenheter</strong> (care units) under
-        it. Affiliations may only target an internal org. External partners are
-        managed in the External Partners panel below and are not part of the
-        hierarchy.
+    <p class="text-muted" style="margin:0 0 0.75rem;font-size:0.85rem;">
+        Care organisations form <strong>two levels</strong>. A
+        <strong>vårdgivare</strong> (care provider) is the legal entity. Beneath
+        it sit its <strong>vårdenheter</strong> (care units) &mdash; one
+        vårdgivare normally has several. A vårdenhet is the
+        <strong>spärrgräns</strong>: the boundary a patient's block
+        (<em>spärr</em>) applies across, so which unit a person belongs to is a
+        legal question, not just a label. Affiliations may only target a care
+        organisation or unit. External partners are not part of this hierarchy
+        and are managed in the External Partners panel below.
     </p>
+
     <div style="overflow-x:auto;">
-    <table>
-        <thead><tr><th>Name</th><th>Kind / Parent</th><th>Users</th><th>Patients</th><th>Requests</th><th>Actions</th></tr></thead>
-        <tbody>
-        {% for o in organisations %}
-            {# GUID kept as a tooltip on hover for SU debugging; not displayed inline. #}
+    <table class="org-table">
+        <thead>
             <tr>
-                <td title="GUID: {{ o.organisation_guid }}">{{ o.name }}</td>
-                <td style="font-size:0.8rem;">
-                    {% if o.kind == 'external' %}
-                        <span class="badge" style="background:#ede9fe;color:#5b21b6;">External</span>
-                    {% else %}
-                        {% if o.kind == 'care_organisation' %}
-                            <span class="badge" style="background:#dbeafe;color:#1e40af;">Vårdgivare</span>
-                        {% else %}
-                            <span class="badge" style="background:#dcfce7;color:#166534;">Vårdenhet</span>
-                            <span style="color:var(--muted);">↳ {{ o.parent_caregiver_name or (o.parent_caregiver_guid[:8] ~ '…') }}</span>
-                        {% endif %}
-                        {# S8: re-parent inline. Blank = promote to vårdgivare. #}
-                        <form method="post" action="/admin/set-org-parent" style="display:inline-flex;gap:2px;align-items:center;margin-left:4px;">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <input type="hidden" name="organisation_guid" value="{{ o.organisation_guid }}">
-                            <select name="parent_caregiver_guid" style="font-size:0.68rem;padding:1px 3px;max-width:130px;">
-                                <option value="">— (vårdgivare)</option>
-                                {% for c in organisations %}
-                                    {% if c.kind == 'care_organisation' and c.organisation_guid != o.organisation_guid %}
-                                    <option value="{{ c.organisation_guid }}" {% if c.organisation_guid == o.parent_caregiver_guid %}selected{% endif %}>{{ c.name }}</option>
-                                    {% endif %}
-                                {% endfor %}
-                            </select>
-                            <button type="submit" class="btn btn-sm btn-secondary" style="padding:1px 5px;font-size:0.68rem;">Set</button>
-                        </form>
-                    {% endif %}
+                <th>Vårdgivare / vårdenhet</th>
+                <th title="Professionals affiliated with this organisation">Users</th>
+                <th title="Patients whose registered organisation is this one">Patients</th>
+                <th title="Outstanding professional access requests naming this organisation">Requests</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for cg in org_tree.caregivers %}
+            <tr class="org-caregiver">
+                <td title="GUID: {{ cg.organisation_guid }}">
+                    <span class="badge org-badge-cg" title="Vårdgivare — the legal care-provider entity">Vårdgivare</span>
+                    <strong>{{ cg.name }}</strong>
+                    <span class="org-unit-count">{{ cg.units | length }} {{ 'vårdenhet' if cg.units | length == 1 else 'vårdenheter' }}</span>
+                </td>
+                <td>{{ cg.user_assignment_count }}</td>
+                <td>{{ cg.patient_count }}</td>
+                <td>{{ cg.access_request_count }}</td>
+                <td>{{ org_delete_button(cg) }}</td>
+            </tr>
+            {% for u in cg.units %}
+            <tr class="org-unit">
+                <td title="GUID: {{ u.organisation_guid }}">
+                    <span class="org-tree-stem">&#9492;</span>
+                    <span class="badge org-badge-unit" title="Vårdenhet — this is the spärrgräns, the boundary a patient block applies across">Vårdenhet</span>
+                    {{ u.name }}
+                    {{ org_reparent_form(u) }}
+                </td>
+                <td>{{ u.user_assignment_count }}</td>
+                <td>{{ u.patient_count }}</td>
+                <td>{{ u.access_request_count }}</td>
+                <td>{{ org_delete_button(u) }}</td>
+            </tr>
+            {% endfor %}
+            {% if not cg.units %}
+            <tr class="org-unit org-unit-empty">
+                <td colspan="5">
+                    <span class="org-tree-stem">&#9492;</span>
+                    <span class="text-muted">No vårdenheter yet. Patients and
+                    affiliations can still name the vårdgivare directly, but the
+                    spärrgräns is then the whole organisation.</span>
+                </td>
+            </tr>
+            {% endif %}
+        {% else %}
+            <tr><td colspan="5" class="text-muted">No care organisations yet.</td></tr>
+        {% endfor %}
+
+        {% if org_tree.orphaned_units %}
+            <tr class="org-section-row"><td colspan="5">
+                <strong style="color:var(--danger);">Vårdenheter with a missing vårdgivare</strong>
+                <span class="text-muted" style="font-size:0.8rem;">
+                    &mdash; their parent guid resolves to no organisation. Re-parent
+                    them; until then their spärrgräns has no owner.</span>
+            </td></tr>
+            {% for u in org_tree.orphaned_units %}
+            <tr class="org-unit">
+                <td title="GUID: {{ u.organisation_guid }}">
+                    <span class="badge org-badge-unit">Vårdenhet</span>
+                    {{ u.name }}
+                    <code style="font-size:0.7rem;">parent {{ (u.parent_caregiver_guid or '—')[:8] }}…</code>
+                    {{ org_reparent_form(u) }}
+                </td>
+                <td>{{ u.user_assignment_count }}</td>
+                <td>{{ u.patient_count }}</td>
+                <td>{{ u.access_request_count }}</td>
+                <td>{{ org_delete_button(u) }}</td>
+            </tr>
+            {% endfor %}
+        {% endif %}
+
+        {% if org_tree.external %}
+            <tr class="org-section-row"><td colspan="5">
+                <strong>External partners</strong>
+                <span class="text-muted" style="font-size:0.8rem;">
+                    &mdash; outside the care hierarchy; no spärrgräns, and
+                    affiliations may not target them.</span>
+            </td></tr>
+            {% for o in org_tree.external %}
+            <tr>
+                <td title="GUID: {{ o.organisation_guid }}">
+                    <span class="badge org-badge-ext">External</span>
+                    {{ o.name }}
                 </td>
                 <td>{{ o.user_assignment_count }}</td>
                 <td>{{ o.patient_count }}</td>
                 <td>{{ o.access_request_count }}</td>
-                <td>
-                    {# Ticket #45: Delete organisation. Hard-blocked in the
-                       backend when patients still reference this org; the
-                       confirm surfaces the dependent counts up-front. #}
-                    {% if o.patient_count > 0 %}
-                        <button type="button" class="btn btn-sm btn-danger" disabled
-                                title="Cannot delete — {{ o.patient_count }} patient(s) still reference this org.">Delete</button>
-                    {% else %}
-                    <form method="post" action="/admin/delete-organisation" style="display:inline;"
-                          onsubmit="return confirm('Delete organisation &quot;{{ o.name }}&quot;?\n\n{{ o.user_assignment_count }} user assignment(s) and {{ o.access_request_count }} access request(s) will also be removed.');">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <input type="hidden" name="organisation_guid" value="{{ o.organisation_guid }}">
-                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-                    </form>
-                    {% endif %}
-                </td>
+                <td>{{ org_delete_button(o) }}</td>
             </tr>
-        {% endfor %}
+            {% endfor %}
+        {% endif %}
         </tbody>
     </table>
     </div>
+
     <form method="post" action="/admin/create-organisation" class="mt-2" style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-group" style="flex:1;margin-bottom:0;min-width:160px;">
-            <label for="org_name">New Organisation</label>
+            <label for="org_name">New organisation</label>
             <input type="text" id="org_name" name="name" required placeholder="Organisation name">
         </div>
         <div class="form-group" style="margin-bottom:0;">
-            <label for="org_parent" title="Leave blank to create a top-level vårdgivare; pick a caregiver to create a vårdenhet under it.">Parent vårdgivare (optional)</label>
-            <select id="org_parent" name="parent_caregiver_guid" style="max-width:200px;">
-                <option value="">— none (create vårdgivare)</option>
-                {% for c in organisations %}
-                    {% if c.kind == 'care_organisation' %}
-                    <option value="{{ c.organisation_guid }}">{{ c.name }}</option>
-                    {% endif %}
+            <label for="org_parent">Belongs to vårdgivare</label>
+            <select id="org_parent" name="parent_caregiver_guid" style="max-width:220px;"
+                    title="Pick a vårdgivare to create a vårdenhet (a spärrgräns) under it. Leave as — to create a new top-level vårdgivare.">
+                <option value="">— none: create a new vårdgivare</option>
+                {% for c in org_tree.caregivers %}
+                <option value="{{ c.organisation_guid }}">under {{ c.name }} (vårdenhet)</option>
                 {% endfor %}
             </select>
+            <p class="hint">Blank makes a vårdgivare; choosing one makes a vårdenhet beneath it.</p>
         </div>
-        <button type="submit" class="btn btn-primary">Create</button>
+        <button type="submit" class="btn btn-primary" title="Create the organisation">Create</button>
     </form>
 </div>
 
@@ -445,66 +667,18 @@
     </div>
 </div>
 
-<!-- Documentation Downloads -->
-<div class="card">
-    <h3>Documentation</h3>
-    <p class="text-muted mb-1" style="font-size:0.85rem;">All manuals and specifications available for download.</p>
-    <table>
-        <thead><tr><th>Document</th><th>Download</th></tr></thead>
-        <tbody>
-            <tr><td>API Reference</td><td><a href="/docs/download/api-reference.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
-            <tr><td>Architecture Overview</td><td><a href="/docs/download/architecture.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
-            <tr><td>Integration Guide</td><td><a href="/docs/download/integration-guide.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
-            <tr><td>Subservice Onboarding & Acceptance</td><td><a href="/docs/download/subservice-onboarding.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
-            <tr><td>Admin Manual</td><td><a href="/docs/download/admin-manual.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
-            <tr><td>External Partners</td><td><a href="/docs/download/external-partners.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
-            <tr><td>Deployment Guide</td><td><a href="/docs/download/deployment-guide.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
-            <tr><td>Pre-Deployment Checklist</td><td><a href="/docs/download/pre-deployment-checklist.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
-            <tr><td>User Guide</td><td><a href="/docs/download/user-guide.md" class="btn btn-sm btn-secondary">Download</a></td></tr>
-        </tbody>
-    </table>
-</div>
+{#
+  #784 D1: the Documentation pane (nine markdown download links) was removed at
+  the operator's request. The /docs/download/<name>.md routes still serve those
+  files and the browsable docs at /docs are untouched -- only the download table
+  on the admin page is gone.
 
-<!-- Oath Overview (Service Registry) with health indicators -->
-<div class="card">
-    <h3 style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-        Service Registry
-        <span id="health-status" style="font-size:0.7rem;font-weight:400;color:var(--text-muted,#6b7280);">checking...</span>
-        <button onclick="window._refreshHealth()" style="margin-left:auto;font-size:0.75rem;padding:3px 10px;border-radius:4px;border:1px solid var(--border,#d1d5db);background:var(--bg,#fff);color:var(--text,#374151);cursor:pointer;">Update availability</button>
-    </h3>
-    {% if oath_overview %}
-    <div style="overflow-x:auto;">
-    <table id="oath-table" style="font-size:0.85rem;">
-        <thead>
-            <tr>
-                <th>Service</th>
-                <th>URL</th>
-                <th style="text-align:center;">API</th>
-                <th style="text-align:center;">DB</th>
-                <th style="text-align:center;">Frontend</th>
-                <th>Privilege</th>
-                <th>Notes</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for row in oath_overview %}
-            <tr>
-                <td style="white-space:nowrap;font-weight:600;">{{ row.get('service_name', '') }}</td>
-                <td><a href="{{ row.get('service_url', '#') }}" target="_blank" style="font-size:0.8rem;">{{ row.get('service_url', '') }}</a></td>
-                <td style="text-align:center;"><span class="health-dot" data-service="{{ row.get('service_name', '') }}" data-aspect="api" title="Checking..."></span></td>
-                <td style="text-align:center;"><span class="health-dot" data-service="{{ row.get('service_name', '') }}" data-aspect="db" title="Checking..."></span></td>
-                <td style="text-align:center;"><span class="health-dot" data-service="{{ row.get('service_name', '') }}" data-aspect="frontend" title="Checking..."></span></td>
-                <td>{{ row.get('privilege_level', '') }}</td>
-                <td style="font-size:0.8rem;">{{ row.get('notes', '') }}</td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
-    {% else %}
-    <p class="text-muted">No services registered.</p>
-    {% endif %}
-</div>
+  #784 D2: the Service Registry pane was removed with it, together with the
+  health-dot CSS and the script that polled /api/service-health on load and
+  every 30 minutes. Removing the table but leaving the poller would have left a
+  timer repainting dots that no longer exist. frontend.py::admin_page() no
+  longer reads oath_overview.csv either.
+#}
 
 <!-- External Partners (replaces the legacy KEYAUTH_SERVICE_* registry) -->
 <div class="card">
@@ -582,11 +756,43 @@
 <!-- Registries — Roles & Research Projects (S2 #398 / #400) -->
 <div class="card">
     <h3>Registries — Roles &amp; Research Projects</h3>
-    <p class="text-muted" style="font-size:0.85rem;margin:0 0 0.5rem;">
-        SU-managed reference lists that feed the Affiliations form above. Reads are
-        open to professionals; writes are SU-only. A role's <em>permitted phases</em>
-        decide which phase grants make an affiliation "useful" for activation.
-    </p>
+    {# #784 E1: the pane said what it technically was, not what it decides. #}
+    <div class="reg-explain">
+        <p>
+            These two lists are the <strong>vocabulary the rest of the platform
+            authorises against</strong>. They are not free text: an affiliation
+            can only name a role that exists here, and a research read can only
+            name a project that exists here. Adding a row makes a new answer
+            possible across the whole platform; deleting one removes it.
+        </p>
+        <p>
+            <strong>Roles</strong> describe what a person is in an organisation
+            &mdash; their <em>zone</em> separates <code>care</code> (treating
+            patients) from <code>analysis</code> (secondary use of data), and
+            their <em>permitted phases</em> decide which phase grants make an
+            affiliation complete enough to activate. The role also decides the
+            read <em>purpose</em> the consent gate filters on: the analysis
+            services match on the role's <strong>name</strong> &mdash; one
+            containing "research" reads as research, one containing "quality" or
+            "registr" as quality-registry, anything else clinical as statistics.
+            So the name is load-bearing, not cosmetic: renaming a role can
+            change which patients its holders may see.
+        </p>
+        <p>
+            <strong>Research projects</strong> are the units patients consent
+            to, one at a time. Research consent is per project, never blanket:
+            a patient who consented to project A is excluded from project B.
+            The ethics reference belongs with the project because it is the
+            documentation that makes the consent lawful. A project named here
+            with no patient consents yields an empty cohort &mdash; which is
+            the correct, and intended, outcome.
+        </p>
+        <p class="reg-explain-note">
+            Reads are open to professionals; writes are SU-only. Changing a
+            role's permitted phases does not re-run activation for people who
+            already hold that role.
+        </p>
+    </div>
     <p id="reg-error" style="display:none;color:#dc2626;font-size:0.85rem;"></p>
     <div class="grid-2">
         <div>
@@ -800,86 +1006,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<style>
-.health-dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: #adb5bd;
-    transition: background 0.3s, box-shadow 0.3s;
-}
-.health-dot.ok       { background: #16a34a; box-shadow: 0 0 6px rgba(22,163,74,0.5); }
-.health-dot.down     { background: #dc2626; box-shadow: 0 0 6px rgba(220,38,38,0.5); }
-.health-dot.timeout  { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.4); }
-.health-dot.error    { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.4); }
-.health-dot.unknown  { background: #adb5bd; }
-.health-dot.checking { background: #adb5bd; animation: pulse 1s infinite; }
-@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
-</style>
 <script>
-(function () {
-    var STATUS_LABEL = {ok:'Healthy', down:'Down', timeout:'Timeout', error:'Error', unknown:'Unknown', checking:'Checking...'};
-    var intervalMs = 1800000; // default 30 min, updated from server response
-
-    function setDot(dot, status) {
-        dot.className = 'health-dot ' + status;
-        dot.title = STATUS_LABEL[status] || status;
-    }
-
-    function setAllChecking() {
-        document.querySelectorAll('.health-dot').forEach(function(d) { setDot(d, 'checking'); });
-    }
-
-    function applyResults(data) {
-        var services = data.services || [];
-        // Update interval from server config
-        if (data.interval_seconds) {
-            intervalMs = data.interval_seconds * 1000;
-        }
-        services.forEach(function(svc) {
-            ['api','db','frontend'].forEach(function(aspect) {
-                var dot = document.querySelector('.health-dot[data-service="'+svc.service_name+'"][data-aspect="'+aspect+'"]');
-                if (dot) {
-                    setDot(dot, svc[aspect] || 'unknown');
-                }
-            });
-        });
-        var ts = data.checked_at || new Date().toISOString();
-        var statusEl = document.getElementById('health-status');
-        if (statusEl) {
-            var nextMin = Math.round(intervalMs / 60000);
-            statusEl.textContent = 'last checked ' + ts.replace('T',' ').replace('Z',' UTC') + ' · next in ' + nextMin + ' min';
-        }
-    }
-
-    function fetchHealth() {
-        setAllChecking();
-        fetch('/api/service-health')
-            .then(function(r) { return r.json(); })
-            .then(applyResults)
-            .catch(function() {
-                document.querySelectorAll('.health-dot').forEach(function(d) { setDot(d, 'error'); });
-                var statusEl = document.getElementById('health-status');
-                if (statusEl) statusEl.textContent = 'health check failed';
-            });
-    }
-
-    function scheduleNext() {
-        setTimeout(function() {
-            fetchHealth();
-            scheduleNext();
-        }, intervalMs);
-    }
-
-    // Expose for manual refresh button
-    window._refreshHealth = fetchHealth;
-
-    // Initial check + start cycle
-    fetchHealth();
-    scheduleNext();
-})();
-
 /* --- Service Key Management --- */
 (function () {
     var svcSelect = document.getElementById('km-service');

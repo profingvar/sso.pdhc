@@ -746,3 +746,91 @@ Verified end to end: the exact crontab command run under a cron-like
 environment exited 0 and wrote
 `Tue Sep 29 10:48:50 UTC 2026 revoked_tokens: 0 rows before, 0 pruned, 0 remain.`
 The first scheduled run is 04:07 UTC tomorrow.
+
+## 2026-10-07 — #784 SSO reform: landing page, person registry, organisations
+
+Operator-requested reform of the user-facing surfaces. Mostly presentation, but
+investigation turned three items into real defects, two of which the existing
+337-test suite could not have caught.
+
+### The three defects behind the cosmetic requests
+
+**1. "Export CSV does not work" — it answered 401 for every browser click.**
+The admin page linked `<a href="/api/admin/export-users" target="_blank">`.
+That route is `@require_auth`, and `require_auth` accepts ONLY an
+`Authorization: Bearer` header (`middleware/auth_middleware.py::_get_current_user`).
+A browser following a link sends the session cookie and no bearer token, so the
+new tab contained `{"error": "authentication_required"}`.
+
+It was an asymmetry, not a mystery. Import works because it already had a
+session-authenticated twin at `/admin/import-users` in `frontend.py`; export
+never got one. The API route is deliberately **not** loosened — a test now pins
+that it still refuses a cookie-only request, so "fixing" this by weakening the
+API would fail.
+
+Why no test caught it: the suite exercised the API route *with a token*, where
+it works. Nothing exercised the link a human clicks.
+
+**2. The organisation name could never render.** The Person Registry resolved
+it with `{% set org_name = o.name %}` inside a nested `{% for %}`. Jinja2
+scopes such an assignment to the loop iteration, so `org_name` was always `''`
+on the way out and the cell **always** fell back to `org_id[:8]`. Verified
+against jinja2 3.1.6 before changing anything rather than assumed. The route
+now passes an explicit `org_names` mapping, which also replaces an
+O(users x orgs) scan with a lookup. A dangling assignment now reads
+"(unknown org abcd1234…)" instead of a bare hex fragment.
+
+**3. Imported accounts kept a known shared password indefinitely.** Not in the
+ticket — found while documenting the import template, which has to state that
+every imported account is created as `changeme01`. That is only safe to say if
+the account must change it, and `force_change_on_next_login` was being left
+False. The gate that enforces it (`_force_password_change_gate`) already
+existed; import simply never set the flag. Now set, and a test walks an
+imported user through `/dashboard` to prove the redirect fires — asserting the
+column alone would have proved nothing.
+
+### Delivered
+
+| item | what |
+|---|---|
+| A1/A2 | platform-standard nav ribbon `PDHC / sso.pdhc`, copied verbatim from the 8 siblings that already carry it. In `base.html`, so every page gets it. sso.pdhc was one of the services that never adopted it. |
+| A3 | Platform Services table + Connected Services cards removed, with the ~120-line health prober and the `oath_overview.csv` read behind them |
+| A4/A5 | the two cards retitled to the action ("Register as a patient to join the health data registry", "Request access as a healthcare professional") |
+| B1 | session-authenticated `GET /admin/export-users` |
+| B2 | the file input says "CSV file of people to add:" |
+| B3 | "Show template" panel + `GET /admin/users-csv-template`, both generated from one `USER_CSV_COLUMNS` contract shared with the importer and the export, so the three cannot drift |
+| B4 | GUID / email / type / name / role packed into one Person cell; 10 columns to 6 |
+| B5 | organisation by name (see defect 2) |
+| B6 | tooltips on Promote SU / Reset pw / Flush / Del, saying what each does and does not do |
+| C1 | Organisations grouped: each vårdgivare with its vårdenheter nested beneath, externals in their own section, and the **spärrgräns** meaning stated — a vårdenhet is the boundary a patient block applies across, so the level is a legal fact and not a label. A unit whose parent guid resolves to nothing is surfaced, not hidden; grouping by parent would otherwise have made it vanish. |
+| D1/D2 | Documentation and Service Registry panes removed. The `/docs/download/*` routes are untouched and a test pins that. |
+| E1 | registries pane explains what it decides, not what it is |
+
+### Tests
+
+`app/tests/test_sso_reform_784.py` — 24 tests, **22 fail against the untouched
+tree** (verified by `git stash`). The 2 that pass either way are deliberate
+regression guards: that the API export route still refuses a cookie, and that
+removing the Documentation pane did not take the docs routes with it.
+
+`test_frontend.py::TestLandingPage` had `assert 'Platform Services' in html`
+— correct for ticket #59, which built it. Inverted to assert absence, because
+both sections were rendered from a CSV read that is now gone: if either
+returned it would render empty, which looks like an outage rather than a
+removal.
+
+**Two test bugs found and fixed in my own tests, both the same mistake:**
+anchoring on a bare class name (`org-chip`, `org-section-row`) matched the
+CSS rule that defines it, earlier in the document, rather than the markup.
+One of them made an assertion pass against a slice of stylesheet. A third
+assertion matched the old page's prose "External partners are managed in the
+External Partners panel below" and so passed *before* the change — the #729
+trap exactly. All three now anchor on `class="..."` and assert structure.
+
+### NOT deployed — Rule 12 / Rule 19
+
+`top_rules.md` reserves web deployment of this service to the operator ("no ssh
+or scp from the plan"), and sso.pdhc is the service every other service
+revalidates tokens against on every request. Local suite green; deploy awaiting
+the operator. No auth behaviour was changed: this is presentation, one missing
+session-authenticated route, and one password-policy flag.

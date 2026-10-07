@@ -517,18 +517,54 @@ class TestDocsPage:
 # ============================================================
 
 class TestLandingPage:
-    """Landing page with service list."""
+    """Landing page: login, patient registration, professional access."""
 
     def test_landing_renders(self, client, app):
         resp = client.get('/')
         assert resp.status_code == 200
         html = resp.data.decode()
         assert 'sso.pdhc' in html
-        # The landing page groups services into two sections after the
-        # 2026-04 rewrite (ticket #59): SSO-authenticated core services
-        # and non-SSO-authenticated provider/patient endpoints.
-        assert 'Platform Services' in html
-        assert 'Connected Services' in html
+
+    def test_the_service_inventory_is_gone(self, client, app):
+        """#784 A3 inverts this assertion, and the inversion is the point.
+
+        This test used to require 'Platform Services' and 'Connected Services'
+        to be present — correct for ticket #59, which built them. The operator
+        removed both: a service inventory with live status dots belongs to
+        www.pdhc.se/services.html, and the landing page of the auth service is
+        where someone arrives to log in or register.
+
+        Asserting their ABSENCE matters more than deleting the test would,
+        because the two sections were rendered from oath_overview.csv and the
+        CSV read was removed with them. If either section returns while that
+        read is gone, it returns empty — a table with headers and no rows,
+        which looks like an outage rather than a removal.
+        """
+        html = client.get('/').data.decode()
+        assert 'Platform Services' not in html
+        assert 'Connected Services' not in html
+        assert 'provider1.pdhc.se' not in html
+
+    def test_the_two_calls_to_action_say_what_they_do(self, client, app):
+        """#784 A4/A5: the card headings are the action, not a category."""
+        html = client.get('/').data.decode()
+        assert 'Register as a patient to join the health data registry' in html
+        assert 'Request access as a healthcare professional' in html
+        # The category labels they replaced must not linger beside them.
+        assert 'Patient Registration' not in html
+        assert 'Professional Access' not in html
+
+    def test_the_platform_ribbon_is_on_every_page(self, client, app):
+        """#784 A1/A2: PDHC links out, sso.pdhc stays as the second button.
+
+        Checked on two unauthenticated pages rather than one, because the
+        ribbon lives in base.html precisely so it is not a landing-page
+        decoration.
+        """
+        for path in ('/', '/login'):
+            html = client.get(path).data.decode()
+            assert 'https://www.pdhc.se/services.html' in html, path
+            assert '>sso.pdhc</a>' in html, path
 
 
 # ============================================================
