@@ -834,3 +834,61 @@ or scp from the plan"), and sso.pdhc is the service every other service
 revalidates tokens against on every request. Local suite green; deploy awaiting
 the operator. No auth behaviour was changed: this is presentation, one missing
 session-authenticated route, and one password-policy flag.
+
+### 2026-10-07 — #784 DEPLOYED, and two things the deploy taught
+
+Operator overrode Rule 19 ("deploy it"). Live and healthy:
+`{"database":"connected","service":"sso.pdhc","status":"ok"}`. Verified on the
+live site: the two new card titles are present, Platform Services and Connected
+Services are gone, the PDHC ribbon is there, and `/admin`,
+`/admin/export-users` and `/admin/users-csv-template` all 302 for anonymous.
+In-container greps confirm the new code is in the image rather than the host
+only. Backup: `miserver:~/backups/predeploy/sso.pdhc/20261007T120154Z/`.
+
+**1. The compare step caught a bug in my own deploy script.** It resolved the
+live tree from `sso_app`'s compose `working_dir` — `/usr/local/www/sso.pdhc/app`
+— and then appended `app/src/...`, so it looked for `.../app/app/src/...` and
+reported all four files as "does not exist on the server yet". Had it copied
+blindly it would have created a phantom `app/app/` tree, the rebuild and the
+health probe would both have passed, and the deploy would have been reported
+successful while the service kept serving the old code. The script now resolves
+the source root by looking for `src/` under both candidates and refuses to guess.
+
+It was then strengthened past the original design. The useful question is not
+"does the server differ from my new file" — it must — but **"does the server
+still match what I started from"**. The bundle now carries a `baseline/`
+directory straight out of `git show HEAD~1`, and each file is classified
+SAFE-REPLACE (server == baseline, so my edits are the only change) or
+*** DRIFT *** (server was edited and never committed), which aborts. All four
+reported SAFE-REPLACE.
+
+**2. A four-file deploy upgraded every Python dependency.** `requirements.txt`
+pins with `>=`, and the `COPY requirements.txt` layer missed cache, so
+`--build` resolved the whole stack fresh:
+
+| package | now |
+|---|---|
+| bcrypt | **5.0.0** (major bump) |
+| Flask | 3.1.3 |
+| SQLAlchemy | 2.1.3 |
+| gunicorn | 26.2.0 |
+| PyJWT | 2.15.1 |
+| pydantic | 2.13.5 |
+
+This was not intended and is worth knowing: **any `--build` on this service
+re-resolves its dependencies.** The bcrypt major bump is the dangerous one — if
+its API or hash format had moved, nobody could log in and the failure would look
+like "wrong password" rather than a deploy fault. Checked rather than assumed:
+
+* hash/verify roundtrip in-container — 60-char hash, right password True, wrong False
+* all 6 stored hashes are `$2b$`, 60 chars, and bcrypt 5.0.0 parses every one
+  (returns False for a wrong password instead of raising), so existing logins work
+* `GET /api/auth/me/service` with bad credentials returns 401 with the expected
+  JSON, not a 500 — the cross-service path every sibling depends on still runs
+* SQLAlchemy 2.1.3 is the version that flips the default postgres driver (#711);
+  harmless here because the URL pins `+psycopg2` explicitly, and `database:
+  connected` confirms it
+* no errors in `sso_app` logs since the deploy
+
+Follow-up worth a ticket: pin these dependencies, or accept that every rebuild
+of the platform's auth service is also an unreviewed dependency upgrade.

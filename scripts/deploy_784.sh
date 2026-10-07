@@ -30,11 +30,12 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP="$HOME/backups/predeploy/sso.pdhc/$TS"
 
+# Paths RELATIVE TO THE SOURCE ROOT (the directory containing src/).
 FILES=(
-  "app/src/templates/base.html"
-  "app/src/templates/landing.html"
-  "app/src/templates/su_admin.html"
-  "app/src/routes/frontend.py"
+  "src/templates/base.html"
+  "src/templates/landing.html"
+  "src/templates/su_admin.html"
+  "src/routes/frontend.py"
 )
 
 # --- Locate the live tree from the container itself, not from a guess. ---
@@ -48,32 +49,79 @@ if [ -z "$LIVE" ] || [ ! -d "$LIVE" ]; then
   echo "       Find it with:  docker inspect sso_app --format '{{json .Config.Labels}}'"
   exit 2
 fi
-echo "live tree : $LIVE"
-echo "new files : $SRC"
+# The compose working_dir may BE the source root or its parent, depending on
+# where docker-compose.yml sits. On sso.pdhc it is /usr/local/www/sso.pdhc/app,
+# which already contains src/ -- the first version of this script appended
+# "app/" again and reported all four files as missing. That refusal is why
+# nothing was written. Resolve it explicitly and fail loudly if neither
+# candidate holds src/, rather than inventing a path and creating a phantom
+# tree that the health probe would happily pass.
+if   [ -d "$LIVE/src" ];     then ROOT="$LIVE"
+elif [ -d "$LIVE/app/src" ]; then ROOT="$LIVE/app"
+else
+  echo "ERROR: no src/ under '$LIVE' or '$LIVE/app'. Refusing to guess."
+  exit 2
+fi
+
+# Same question for the bundle.
+if   [ -d "$SRC/src" ];     then NEWROOT="$SRC"
+elif [ -d "$SRC/app/src" ]; then NEWROOT="$SRC/app"
+else
+  echo "ERROR: no src/ in the bundle at '$SRC'."
+  exit 2
+fi
+
+echo "live root : $ROOT"
+echo "new files : $NEWROOT"
+echo "baseline  : $SRC/baseline"
 echo "mode      : $MODE"
 echo
 
 # --- Rule 12: compare before anything else. ---
+# The question is NOT "does the server differ from my new file" -- of course it
+# does, that is the point. It is "does the server still match what I started
+# from". `baseline/` holds the pre-change copies straight out of git. If the
+# server matches the baseline, my edits are the only change and the copy is
+# provably safe. If it does not, somebody edited the server and never committed
+# it, and copying would destroy that work.
 DIFFER=0
+DRIFT=0
 MISSING=0
 for f in "${FILES[@]}"; do
-  new="$SRC/$f"
-  old="$LIVE/$f"
+  new="$NEWROOT/$f"
+  old="$ROOT/$f"
+  base="$SRC/baseline/$f"
   if [ ! -f "$new" ]; then
     echo "MISSING-NEW   $f   (not in this bundle)"; MISSING=1; continue
   fi
   if [ ! -f "$old" ]; then
-    echo "NEW-FILE      $f   (does not exist on the server yet)"; DIFFER=1; continue
+    echo "NEW-FILE      $f   (not on the server yet)"; DIFFER=1; continue
   fi
-  h_new="$(shasum -a 256 "$new" | cut -d' ' -f1)"
-  h_old="$(shasum -a 256 "$old" | cut -d' ' -f1)"
+  h_new="$(shasum -a 256 "$new"  | cut -d' ' -f1)"
+  h_old="$(shasum -a 256 "$old"  | cut -d' ' -f1)"
+  h_base=""
+  [ -f "$base" ] && h_base="$(shasum -a 256 "$base" | cut -d' ' -f1)"
+
   if [ "$h_new" = "$h_old" ]; then
-    echo "IDENTICAL     $f"
-  else
-    echo "WILL-REPLACE  $f"
-    echo "              server $(wc -c <"$old" | tr -d ' ') bytes, $(stat -f '%Sm' "$old")"
-    echo "              new    $(wc -c <"$new" | tr -d ' ') bytes"
+    echo "IDENTICAL     $f   (already deployed)"
+    continue
+  fi
+  if [ -z "$h_base" ]; then
+    echo "NO-BASELINE   $f   — cannot prove the server is unmodified"; DRIFT=1
+  elif [ "$h_old" = "$h_base" ]; then
+    echo "SAFE-REPLACE  $f"
+    echo "              server matches my pre-change baseline exactly"
+    echo "              $(wc -c <"$old" | tr -d ' ') -> $(wc -c <"$new" | tr -d ' ') bytes"
     DIFFER=1
+  else
+    echo "*** DRIFT ***  $f"
+    echo "              the server copy is NOT my baseline — it was edited"
+    echo "              on the server and never committed."
+    echo "              server   $(wc -c <"$old" | tr -d ' ') bytes, $(stat -f '%Sm' "$old")"
+    echo "              baseline $(wc -c <"$base" | tr -d ' ') bytes"
+    echo "              diff --- server vs baseline (first 40 lines) ---"
+    diff "$base" "$old" | head -40 | sed 's/^/              /' || true
+    DRIFT=1
   fi
 done
 echo
@@ -81,6 +129,12 @@ echo
 if [ "$MISSING" = "1" ]; then
   echo "ABORT: the bundle is incomplete. Nothing was changed."
   exit 3
+fi
+if [ "$DRIFT" = "1" ]; then
+  echo "ABORT: at least one server file is not what I started from."
+  echo "Nothing was changed. Save the server copy, reconcile it into git,"
+  echo "then rebuild the bundle. Do NOT pass --apply to get past this."
+  exit 6
 fi
 if [ "$DIFFER" = "0" ]; then
   echo "Nothing to do — the server already matches this bundle."
@@ -91,11 +145,11 @@ if [ "$MODE" != "--apply" ]; then
   cat <<'MSG'
 Compare only. NOTHING was written.
 
-Read the WILL-REPLACE lines above. If any server file is NEWER than you expect,
-stop: someone edited it on the server and it was never committed. Save that
-copy first.
+Every file above should say SAFE-REPLACE, meaning the server copy is byte-for-byte
+my pre-change baseline, so my edits are the only change. Any *** DRIFT *** line
+aborts on its own -- do not try to get past it with --apply.
 
-  ./deploy_784.sh --apply     # when the comparison looks right
+  ./deploy_784.sh --apply     # when every line says SAFE-REPLACE
 MSG
   exit 0
 fi
@@ -104,17 +158,17 @@ fi
 echo "Backing up the live copies to $BACKUP"
 mkdir -p "$BACKUP"
 for f in "${FILES[@]}"; do
-  if [ -f "$LIVE/$f" ]; then
+  if [ -f "$ROOT/$f" ]; then
     mkdir -p "$BACKUP/$(dirname "$f")"
-    cp -p "$LIVE/$f" "$BACKUP/$f"
+    cp -p "$ROOT/$f" "$BACKUP/$f"
   fi
 done
 echo "Backed up $(find "$BACKUP" -type f | wc -l | tr -d ' ') file(s)."
 echo
 
 for f in "${FILES[@]}"; do
-  mkdir -p "$LIVE/$(dirname "$f")"
-  cp "$SRC/$f" "$LIVE/$f"
+  mkdir -p "$ROOT/$(dirname "$f")"
+  cp "$NEWROOT/$f" "$ROOT/$f"
   echo "copied  $f"
 done
 echo
@@ -122,11 +176,11 @@ echo
 # Syntax-check the one Python file before anything restarts. A broken
 # frontend.py takes the whole auth service down, and every other PDHC service
 # revalidates its tokens here on every request.
-python3 -m py_compile "$LIVE/app/src/routes/frontend.py" \
+python3 -m py_compile "$ROOT/src/routes/frontend.py" \
   && echo "py_compile OK" \
   || { echo "ERROR: frontend.py does not compile. Restoring the backup."
        for f in "${FILES[@]}"; do
-         [ -f "$BACKUP/$f" ] && cp -p "$BACKUP/$f" "$LIVE/$f"
+         [ -f "$BACKUP/$f" ] && cp -p "$BACKUP/$f" "$ROOT/$f"
        done
        echo "Restored. Service untouched."; exit 4; }
 echo
@@ -147,7 +201,7 @@ for i in $(seq 1 30); do
   sleep 2
   [ "$i" = "30" ] && { echo "WARNING: /api/health did not come back in 60s."
                        echo "Last 40 log lines:"; docker logs --tail 40 sso_app
-                       echo "Roll back with: cp -rp $BACKUP/app $LIVE/app && (cd $LIVE && $DC up -d --build app)"
+                       echo "Roll back with: cp -rp $BACKUP/src $ROOT/src && (cd $LIVE && $DC up -d --build app)"
                        exit 5; }
 done
 echo
@@ -161,4 +215,4 @@ docker exec sso_app grep -c "USER_CSV_COLUMNS" /app/src/routes/frontend.py \
   2>/dev/null | sed 's/^/  USER_CSV_COLUMNS occurrences : /' || true
 echo
 echo "Done. Backup: $BACKUP"
-echo "Roll back:  cp -rp $BACKUP/app $LIVE/app && (cd $LIVE && $DC up -d --build app)"
+echo "Roll back:  cp -rp $BACKUP/src $ROOT/src && (cd $LIVE && $DC up -d --build app)"
