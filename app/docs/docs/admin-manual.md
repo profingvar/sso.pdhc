@@ -32,14 +32,39 @@ and **organisation scope** — no single one implies another.
 
 ### User Management
 
-#### View All Users
+#### The Person Registry
 
-The user table shows all registered users with:
+Reorganised in #784 (B4/B5). It was ten columns wide, which meant horizontal
+scrolling on any realistic screen and no way to read one person as one thing.
 
-- Email, user type (patient/professional), SU status
-- Professional details: name, role (doctor/nurse/other)
-- Group memberships and admin status
-- Organisation affiliations
+It is now **six columns**, with the identity fields packed into a single
+**Person** cell — GUID, email, user type, name and role together, because they
+describe one person and were never useful apart:
+
+| column | holds |
+|---|---|
+| Person | GUID, email, user type, name, professional role |
+| Organisation | the affiliated care unit, **by name** |
+| Phases | granted phases |
+| Groups | memberships and group-admin status |
+| Status | SU, activation, forced-password-change |
+| Actions | Promote SU / Reset pw / Flush / Del |
+
+**The organisation is shown by name, which it never was before #784.** The
+page resolved it with `{% set org_name = o.name %}` inside a nested `{% for %}`
+loop, and Jinja2 scopes that assignment to the loop iteration — so the variable
+was always empty on the way out and the cell *always* fell back to the first
+eight characters of the GUID. Every administrator who ever read this table saw
+a hex fragment and had no way to know a name was intended.
+
+The route now passes an explicit `org_names` mapping, which also replaced an
+O(users × organisations) scan with a lookup. An affiliation whose organisation
+GUID resolves to nothing reads **"(unknown org abcd1234…)"** rather than a bare
+fragment — a dangling reference is a thing to fix, so it says so.
+
+Each action button carries a **tooltip stating what it does and what it does
+not do** (#784 B6), because "Flush" and "Reset pw" are both irreversible from
+the user's point of view and neither name says how far it reaches.
 
 **API:** `GET /api/admin/users`
 
@@ -71,18 +96,51 @@ Removes a user and their associated data. The system:
 
 #### CSV Export
 
-Downloads all users as a CSV file with columns: `user_guid`, `email`, `user_type`, `is_su_admin`, `first_name`, `last_name`, `professional_role`, `created_at`.
+Downloads every person as CSV. Use the **Export CSV** button on the admin page.
 
-**API:** `GET /api/admin/export-users`
+**Two routes, and the difference matters:**
+
+| route | authenticates with | use from |
+|---|---|---|
+| `GET /admin/export-users` | the **session cookie** | a browser (this is what the button uses) |
+| `GET /api/admin/export-users` | `Authorization: Bearer <token>` | a script or another service |
+
+Before #784 only the API route existed, and the admin page linked straight to
+it. `require_auth` accepts **only** a bearer header, so a browser following
+that link sent its cookie, no token, and opened a new tab containing
+`{"error": "authentication_required"}`. Export appeared broken for every human
+who clicked it while working perfectly for every script.
+
+It was an asymmetry rather than a mystery: **import** already had a
+session-authenticated twin; export never got one. The API route was
+deliberately **not** loosened to accept a cookie — a test pins that it still
+refuses one, so "fixing" this by weakening the API would fail the suite. The
+columns come from a single `USER_CSV_COLUMNS` contract shared by the exporter,
+the importer and the template below, so the three cannot drift apart.
 
 #### CSV Import
 
-Upload a CSV file to bulk-create users. Requirements:
+Upload a CSV to bulk-create people. The file input reads **"CSV file of people
+to add:"**, and a **Show template** panel on the page prints the exact header
+row expected (`GET /admin/users-csv-template`), generated from the same
+`USER_CSV_COLUMNS` contract as the export — so the template cannot describe a
+format the importer does not accept.
 
-- CSV must have headers matching the export format
-- Existing emails are skipped (not overwritten)
-- New users get temporary password `changeme01`
-- Users should change their password on first login
+- Headers must match that template
+- Existing emails are **skipped**, never overwritten
+- Every imported account is created with the password **`changeme01`**
+- **The account must change it at first login.** Not "should" — the
+  `force_change_on_next_login` flag is set and `/dashboard` redirects to the
+  change-password page until it is done.
+
+That last point was a real defect found while writing this section, not a
+feature. The documentation has to state the shared password in order to be
+usable, and that is only safe to write down if the account cannot keep it. The
+gate enforcing it already existed; import simply never set the flag, so every
+imported account kept a known shared password indefinitely. Fixed in #784, with
+a test that walks an imported user through `/dashboard` and asserts the
+redirect fires — asserting the column alone would have proved nothing about the
+gate.
 
 **API:** `POST /api/admin/import-users` (multipart form, `file` field)
 
@@ -288,11 +346,40 @@ internal before a professional can be affiliated to it.
 - Read the derived views: `GET /api/registry/care-organisations` (caregivers)
   and `GET /api/registry/care-units`.
 
-!!! warning "Panel gap"
-    The current SU panel's Create-Organisation form only sends `name`, and the
-    org table does not show parent / internal-external. Until that is added,
-    set `parent_caregiver_guid` and `is_external` via the API (`PUT
-    /api/admin/organisations/<guid>`).
+##### How the panel displays it (#784 C1)
+
+The organisation table is **grouped, not flat**. Each vårdgivare heads a
+section with its vårdenheter nested beneath it, and external partners sit in
+their own section at the end. Every row is classified server-side into one of
+three kinds:
+
+| kind | condition |
+|---|---|
+| `care_organisation` | vårdgivare — no parent, not external |
+| `care_unit` | vårdenhet — has a `parent_caregiver_guid` |
+| `external` | `is_external = true` |
+
+**The section headings state what the level MEANS**, not just what it is called:
+a vårdenhet is the **spärrgräns** — the boundary a patient's block applies
+across. That is a legal fact under PDL rather than a naming convention, and an
+administrator moving a unit between caregivers is changing which records a
+spärr hides. Leaving the hierarchy labelled without saying so invited exactly
+that mistake.
+
+**A unit whose parent GUID resolves to nothing is surfaced, not hidden.**
+Grouping strictly by parent would have made such a row vanish from the table
+altogether — present in the database, invisible in the UI, and therefore
+unfixable. It is shown so it can be corrected.
+
+The Create-Organisation form now sends `parent_caregiver_guid` alongside
+`name`, and each row carries a **re-parent** control
+(`POST /admin/set-org-parent`). Re-parenting an external partner is refused:
+*"External partners are not part of the care hierarchy."*
+
+!!! note "Still API-only"
+    `is_external` cannot be set from the panel. An external organisation is
+    created through the External Partner subsystem, or by
+    `PUT /api/admin/organisations/<guid>`.
 
 ---
 
@@ -382,6 +469,13 @@ pending → endorsed → approved (creates account)
 ---
 
 ### Service Registry (Oath Overview)
+
+> **The Service Registry PANE was removed from the UI in #784 (D2)**, together
+> with the Documentation pane (D1). The data and the API below are unchanged —
+> only the admin-page panels that displayed them are gone, because neither
+> showed an administrator anything they could act on. The landing page's
+> Platform Services table and Connected Services cards went in the same pass
+> (A3) along with the health prober that fed them.
 
 The `oath_overview.csv` tracks all services under SSO management.
 

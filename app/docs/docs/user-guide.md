@@ -205,13 +205,46 @@ care unit / caregiver (for scope), and your group memberships (for category).
 Each service composes its own policy from these inputs; the SSO supplies the
 facts.
 
-### Viewing Documentation
+### Finding your way back to the platform
 
-Service documentation is available at `/docs`. This page provides access to
-downloadable documentation files.
+Every page carries the platform ribbon in the top left:
+
+    PDHC / sso.pdhc
+
+`PDHC` returns you to the service index at <https://www.pdhc.se/services.html>;
+`sso.pdhc` is this service's own home. It is the same ribbon every PDHC service
+carries, so it means the same thing everywhere (#784 A1/A2).
+
+### Downloading documentation
+
+Documentation files are served from `/docs/download/<name>`.
+
+The landing page no longer carries a Documentation pane — it was removed in
+#784 (D1) along with the Service Registry pane, because neither told a visitor
+anything they could act on. The download routes themselves are unchanged and
+still work; only the pane that listed them is gone.
 
 ### Landing Page
 
-The landing page (`/`) shows all registered services in the PDHC ecosystem,
-pulled from the service registry.
-</content>
+The landing page (`/`) offers two things, and nothing else:
+
+| card | who it is for |
+|---|---|
+| **Register as a patient to join the health data registry** | a private person creating their own account |
+| **Request access as a healthcare professional** | a clinician who needs an account created for them |
+
+Each card is titled with the **action it performs** rather than the audience it
+names, so a first-time visitor can tell which one applies to them without
+reading further (#784 A4/A5).
+
+What it no longer shows, and why, since the earlier version of this guide
+described it: the page used to render a **Platform Services** table and a set
+of **Connected Services** cards, built by polling every service's health
+endpoint and reading `oath_overview.csv`. Both were removed in #784 (A3).
+
+That removal was deliberate rather than tidying. A visitor arriving at the
+sign-in page of an identity provider is there to sign in; a live status board
+of twenty services is noise at best, and when the prober could not reach a
+service the page implied an outage that the service itself would have denied.
+Platform status belongs on <https://www.pdhc.se/services.html>, which is
+built for it. The ribbon above is the way there.

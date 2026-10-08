@@ -424,3 +424,6 @@ All edited files listed with full path (Rule 17).
 | 2026-10-07 | app/src/routes/frontend.py | `USER_CSV_COLUMNS` contract; session-auth `/admin/export-users`; `/admin/users-csv-template`; import forces password change; `org_names` + `org_tree`; dead `oath_overview.csv` reads removed |
 | 2026-10-07 | app/tests/test_frontend.py | landing assertions inverted — the two sections must now be ABSENT |
 | 2026-10-07 | app/tests/test_sso_reform_784.py | NEW — 24 tests; 22 fail without the fix |
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/user-guide.md
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/admin-manual.md
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/architecture.md

@@ -402,6 +402,18 @@ sequenceDiagram
 Cheaper than inserting N revoked-token rows when the set of active `jti`s is
 unknown (e.g. after a credential compromise across multiple devices).
 
+### Service-credential compare is constant-time
+
+`/api/auth/me/service` is the endpoint **every** downstream service calls to
+validate a token, on every request (Rule 11 forbids caching the blob). Its
+credential check used `service_creds.get(client_id) != client_secret`, whose
+run time depends on how many leading bytes match — a timing oracle on the
+client secret, on the one route guaranteed to be callable at high volume.
+
+It now uses `hmac.compare_digest`, matching the pattern already in
+`auth_middleware`. Both sides are encoded to bytes first, so a non-ASCII header
+returns 403 rather than raising.
+
 ## Access Blob Schema
 
 The access blob is the core data structure returned by `/api/auth/me` and
@@ -655,6 +667,33 @@ flowchart TD
 - **Bulk:** `GET /export-users`, `POST /import-users`,
   `GET|PUT /oath-overview`.
 
+#### Session-authenticated twins (`/admin`, not `/api/admin`)
+
+`require_auth` accepts **only** an `Authorization: Bearer` header. A browser
+following a link sends a session cookie and no bearer token, so an
+`/api/admin/*` route cannot serve a plain `<a href>` — it answers
+`{"error": "authentication_required"}` in a new tab.
+
+The admin page therefore uses cookie-authenticated routes in `frontend.py` for
+anything a human clicks:
+
+| browser route | API twin |
+|---|---|
+| `GET /admin/export-users` | `GET /api/admin/export-users` |
+| `POST /admin/import-users` | `POST /api/admin/import-users` |
+| `GET /admin/users-csv-template` | — (panel only) |
+| `POST /admin/create-organisation`, `POST /admin/set-org-parent` | `POST|PUT /api/admin/organisations` |
+
+Export's twin was missing until #784, which is why the Export CSV button
+returned 401 for every click while the API worked for every script. **The API
+routes are deliberately not loosened to accept a cookie**, and a test pins that
+they still refuse one — so "fixing" a future instance of this by weakening the
+API will fail the suite instead of passing quietly.
+
+The three CSV surfaces (export, import, template) are generated from one
+`USER_CSV_COLUMNS` contract, so a column cannot appear in the template that the
+importer will not accept.
+
 ### Registry surface (`/api/registry`) — SU-edit, read-open
 
 - `GET /roles` (open to any authenticated professional),
@@ -711,10 +750,60 @@ session cookies (`Secure`/`HttpOnly`/`SameSite=Lax`), security headers
 (`X-Frame-Options`, `X-Content-Type-Options`, HSTS, etc.), and a 16 MB upload
 cap.
 
+### `require_organisation` was removed — do not re-add it (#709, 2026-09-29)
+
+A `require_organisation` decorator used to sit in `auth_middleware.py`: *"a
+professional must hold at least one organisation membership; SU admins
+bypass."* It was written before 2026-03-24, deployed uncommitted, and swept
+into git by the #365 reconciliation. **It was never applied to a route.**
+
+The #704 triage flagged it as a rule somebody had intended but was not
+enforcing — and the conclusion is the opposite of that. The only routes it
+would fit are the four `@require_professional` ones in `routes/groups.py`, and
+every one of them is how a professional **obtains** a membership: list-groups,
+request-membership, request-admin, join-by-invite. Gating those on already
+having one locks a new professional out of the only path to getting one,
+permanently.
+
+`tests/test_groups.py::TestRequestMembership` now pins this: its "regular"
+professional holds no `UserOrganisation` row and must succeed. So the decorator
+was not an unenforced rule, it was a rule that would have been wrong to
+enforce, and the test exists to stop it coming back.
+
+## Revoked-token pruning (#704, live since 2026-09-29)
+
+`revoked_tokens` grows by one row per logout and per session flush and nothing
+ever removed them. A row is only useful until the token it names would have
+expired on its own; after that it is answering a question no one can ask.
+
+`app/scripts/prune_tokens.py` deletes rows whose underlying token has expired,
+and `jwt_service` exposes the predicate so the script and the revocation check
+agree on what "expired" means rather than each deciding.
+
+Installed in miserver's crontab, daily at 04:07 UTC:
+
+```
+7 4 * * * docker exec sso_app python scripts/prune_tokens.py 2>&1 | \
+  while read l; do echo "$(date -u) $l"; done >> ~/logs/prune_tokens.log
+```
+
+Two things about that line are deliberate. There is **no `%` anywhere**: in a
+crontab a bare `%` means a newline, so a `date +%F` inside a cron line silently
+never runs. And the timestamp comes from the `while read` wrapper rather than
+from the cron line itself, for the same reason.
+
+## Dependency pinning (#785)
+
+`requirements.txt` is pinned to the versions this service is **actually
+running**, frozen from the live container rather than resolved afresh. Before
+that, a `docker-compose up -d --build` was also an unannounced dependency
+upgrade: the same command on the same day held ips's stack still and moved
+sso's, bcrypt 4 to 5 among them. The pins only cover direct dependencies, which
+the file's own header states.
+
 ## Port Allocation
 
 | Port | Service |
 |------|---------|
 | 9000 | Flask application (Gunicorn) |
 | 9003 | PostgreSQL database |
-</content>
