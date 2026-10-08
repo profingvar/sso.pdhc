@@ -220,7 +220,7 @@ carries, so it means the same thing everywhere (#784 A1/A2).
 Documentation files are served from `/docs/download/<name>`.
 
 The landing page no longer carries a Documentation pane — it was removed in
-#784 (D1) along with the Service Registry pane, because neither told a visitor
+in #784 (D1) along with the Service Registry pane, because neither told a
 anything they could act on. The download routes themselves are unchanged and
 still work; only the pane that listed them is gone.
 
