@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: sso_user
-      POSTGRES_PASSWORD: sso_password
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
       POSTGRES_DB: sso_db
     ports:
       - "9003:5432"
@@ -27,7 +27,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://sso_user:sso_password@db:5432/sso_db
+      DATABASE_URL: postgresql://sso_user:${DB_PASSWORD}@db:5432/sso_db
     env_file:
       - .env
     ports:

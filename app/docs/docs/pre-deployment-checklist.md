@@ -11,7 +11,7 @@ The `.env` file controls all secrets and runtime configuration. Copy `.env.examp
 | # | Item | Default (dev) | Production Action | Done |
 |---|------|---------------|-------------------|------|
 | A.1 | `SECRET_KEY` | random dev key | **CHANGE** — generate 64-char cryptographically random string: `python3 -c "import secrets; print(secrets.token_urlsafe(48))"` | [ ] |
-| A.2 | `DATABASE_URL` | `postgresql://sso_user:sso_password@localhost:9003/sso_db` | **CHANGE** — set strong password for `sso_user`. Format: `postgresql://sso_user:<STRONG_PASSWORD>@localhost:9003/sso_db` | [ ] |
+| A.2 | `DATABASE_URL` | `postgresql://sso_user:change-me-in-production@localhost:9003/sso_db` | **CHANGE** — set strong password for `sso_user`. Format: `postgresql://sso_user:<STRONG_PASSWORD>@localhost:9003/sso_db` | [ ] |
 | A.3 | `FLASK_ENV` | `development` | **CHANGE** to `production` | [ ] |
 | A.4 | `SESSION_EXPIRY_HOURS` | `24` | Review — adjust to organisational policy (e.g. `8` for stricter security) | [ ] |
 | A.5 | `BOOTSTRAP_SU_EMAIL` | `admin@example.com` | **CHANGE** — set to the real admin email address | [ ] |
