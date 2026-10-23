@@ -165,7 +165,18 @@ def logout():
 
     if token_guid and expires_at:
         revoke_token(token_guid, expires_at, session)
-        session.commit()
+
+    # #862: revoking this token alone does not end the user's other sessions.
+    # The SSO handshake mints a SEPARATE token per service and does not store
+    # it, so there are live tokens with other `jti`s that nothing here can
+    # name. Bumping the user's revocation epoch reaches all of them --
+    # `validate_token` has enforced it on every path since #44.
+    from src.models.user import User
+    _u = session.query(User).filter_by(guid=g.current_user.guid).first()
+    if _u is not None:
+        # Floored to the second — see _flush_user_sessions in frontend.py.
+        _u.token_revocation_epoch = datetime.now(timezone.utc).replace(microsecond=0)
+    session.commit()
 
     audit('logout', user_guid=g.current_user.guid, ip=request.remote_addr)
     return jsonify({"message": "Logged out successfully"}), 200

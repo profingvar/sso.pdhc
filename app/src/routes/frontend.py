@@ -287,9 +287,60 @@ def login_page():
     return render_template('login.html', next_url=next_url, state=state)
 
 
+def _flush_user_sessions(db, user_guid):
+    """Invalidate every outstanding token for this user (#862).
+
+    `validate_token` rejects any token whose `iat` precedes
+    `User.token_revocation_epoch`, so this reaches tokens sso never recorded —
+    including the one the SSO handshake mints for a service and forgets.
+
+    Returns True when an epoch was set, so a caller can assert it happened.
+    """
+    if not user_guid:
+        return False
+    from datetime import datetime, timezone
+    from src.models.user import User
+    u = db.query(User).filter_by(guid=user_guid).first()
+    if u is None:
+        return False
+    # TRUNCATED TO THE SECOND, deliberately. pyjwt stores `iat` in whole
+    # seconds, so an epoch carrying microseconds sits AFTER a token issued in
+    # the same second — and a user who logs out and straight back in would have
+    # the fresh token rejected. `test_relogin_issues_fresh_session_id` caught
+    # exactly that.
+    #
+    # Flooring trades that away for a sub-second hole: a token issued in the
+    # same second as the logout survives. Reaching it would mean opening a
+    # service and logging out inside one second, whereas breaking re-login is
+    # ordinary use. The session token is revoked by `jti` regardless.
+    u.token_revocation_epoch = datetime.now(timezone.utc).replace(microsecond=0)
+    return True
+
+
 @frontend_bp.route('/logout', methods=['POST'])
 def logout_page():
-    """Logout — revoke token and clear session."""
+    """Logout — flush EVERY session for this user, not just this token.
+
+    #862: revoking `session['token']` alone did not log the user out of any
+    service. The handshake above mints a SEPARATE token for the service and
+    does not store it, so after opening one service there are two live tokens
+    with different `jti`s and logout revoked one of them. The service went on
+    working for up to SESSION_EXPIRY_HOURS (24), on whatever machine it was
+    left open.
+
+    Bumping `token_revocation_epoch` is the fix, and the machinery already
+    existed: `validate_token` has checked it on every path since #44's bulk
+    session flush, so one line here closes it for all 16 services at once
+    without touching the handshake, the services, or the token format.
+
+    The per-jti revoke is KEPT as well. It costs nothing and it is the right
+    record of "this specific token was deliberately ended".
+
+    One truncation detail, deliberately left: pyjwt stores `iat` in whole
+    seconds, so a token issued later in the SAME second as the logout is also
+    flushed. That errs towards logging out, which is the correct direction for
+    a logout, and one retry fixes it.
+    """
     token = session.get('token')
     if token:
         secret = current_app.config.get('SECRET_KEY', '')
@@ -301,7 +352,8 @@ def logout_page():
             expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else None
             if payload.get('jti') and expires_at:
                 revoke_token(payload['jti'], expires_at, db)
-                db.commit()
+            _flush_user_sessions(db, payload.get('sub'))
+            db.commit()
             audit('logout', user_guid=payload.get('sub'), ip=request.remote_addr)
         except (TokenExpiredError, TokenInvalidError, TokenRevokedError):
             pass
