@@ -504,11 +504,20 @@
             <select id="org_parent" name="parent_caregiver_guid" style="max-width:220px;"
                     title="Pick a vårdgivare to create a vårdenhet (a spärrgräns) under it. Leave as — to create a new top-level vårdgivare.">
                 <option value="">— none: create a new vårdgivare</option>
+                {# The options ARE vårdgivare. They used to read
+                   "under <name> (vårdenhet)", which labelled the PARENT as a
+                   vårdenhet -- the suffix was describing what gets created,
+                   but it attached to the name it followed. A vårdgivare
+                   normally has several vårdenheter, so the count says what
+                   this list is and what choosing one would add to. #}
                 {% for c in org_tree.caregivers %}
-                <option value="{{ c.organisation_guid }}">under {{ c.name }} (vårdenhet)</option>
+                <option value="{{ c.organisation_guid }}">{{ c.name }} — {{ c.units | length }} vårdenhet{{ '' if c.units | length == 1 else 'er' }}</option>
                 {% endfor %}
             </select>
-            <p class="hint">Blank makes a vårdgivare; choosing one makes a vårdenhet beneath it.</p>
+            <p class="hint">Leave blank to create a new <strong>vårdgivare</strong>.
+                Choose one to create a <strong>vårdenhet</strong> beneath it —
+                a vårdgivare normally has several, and the vårdenhet is the
+                spärrgräns.</p>
         </div>
         <button type="submit" class="btn btn-primary" title="Create the organisation">Create</button>
     </form>
