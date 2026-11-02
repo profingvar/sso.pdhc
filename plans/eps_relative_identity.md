@@ -84,11 +84,33 @@ The blob is built per `user_type` branch in `build_access_blob`
 (`app/src/services/auth_service.py:64`). The patient branch (:93-100) emits
 `patient_guid`, `organisation_guid`, `in_registry`, `registries`.
 
-A relative acting for patient P gets a blob shaped like **P's own patient
-blob** — `patient_guid` = P's guid — because that is what makes A3's
-"read as the patient" nearly free: every consumer's existing patient path runs
-unchanged, and `ips.pdhc`'s `care_access_policy` very likely needs **no new
-branch**. (This is the reduction already noted against #889's 8–15 day estimate.)
+**CORRECTED 2026-11-02 while implementing #889.** This section first said the
+blob should carry `patient_guid` = P's guid, on the assumption — made in §5
+below — that sso held the grant. #889 requires the grant to sit *beside*
+`patient_consents`, which is an ips table, and that requirement wins. sso
+therefore does not know which patients a relative may act for, and **the blob
+carries identity only**:
+
+```python
+{'user_type': 'relative', 'user_guid': <the relative's users.guid>}
+```
+
+ips resolves the subject patient from its own `patient_proxy_grants` table and
+sets `g.patient_guid` to it, so A3's "read as the patient" is still nearly
+free — every consumer's existing patient path runs unchanged and
+`care_access_policy` needed **no new zone**. The reduction against #889's
+8–15 day estimate holds; only the location of the grant changed.
+
+Three reasons the correction is also the better architecture:
+
+- patient self-determination over blocks and consents already lives in ips, and
+  granting a relative access is the same kind of act;
+- sso is the bottom of the dependency stack. Had the grant lived there, either
+  sso would have to ask ips — a downstream dependency — or the patient's grants
+  would be administered in a service that owns none of their other
+  self-determination rows;
+- the revocation property below is unaffected, only relocated: ips resolves the
+  grant from its own database on every request.
 
 **But the blob must also say who is actually reading, and this is not
 optional.** The blob's own docstring (`auth_service.py:76-81`) cites
@@ -99,15 +121,13 @@ own. Two fields already separate actor from subject and must both be honoured:
 - `user_guid` — the **relative's** own `users.guid` (the actor)
 - `patient_guid` — **P's** guid (the subject)
 
-plus one new field so a consumer can branch deliberately rather than by
-inference:
-
-```python
-blob['acting_as_relative_for'] = patient.guid   # absent for every other type
-```
-
-Absent, not `None`, for patients and professionals — the same convention the
-patient branch already uses for `organization_ids` (see §3).
+**No new blob field is needed for this after all** (corrected with the above).
+sso cannot name the subject, so the actor/subject distinction is made where the
+subject is known: ips sets `g.proxy_user_guid` (actor) alongside
+`g.patient_guid` (subject), and its `AuditLog` already carries `actor_guid`,
+`actor_type` and `patient_guid` as separate columns — so the chain-of-custody
+requirement needed no schema change at all. Measured in
+`ips.pdhc/gateway/app/models/audit_log.py:25-28`.
 
 ---
 
@@ -251,25 +271,21 @@ CREATE TABLE relatives (
     created_at      TIMESTAMP NOT NULL DEFAULT now()
 );
 
--- 3. the grant. The patient is the asserter; both parties may end it.
-CREATE TABLE patient_relative_grants (
-    id                  SERIAL PRIMARY KEY,
-    guid                VARCHAR(36) UNIQUE NOT NULL,
-    patient_guid        VARCHAR(36) NOT NULL REFERENCES patients(guid),
-    relative_user_guid  VARCHAR(36) REFERENCES users(guid),  -- NULL until redeemed
-    invite_token_hash   VARCHAR(255),                        -- 256-bit, hashed at rest
-    invite_expires_at   TIMESTAMP,
-    scope               VARCHAR(32) NOT NULL,   -- 'read_as_patient' | 'separate_channel'
-    asserted_by_guid    VARCHAR(36) NOT NULL REFERENCES users(guid),  -- the PATIENT's user
-    created_at          TIMESTAMP NOT NULL DEFAULT now(),
-    ended_at            TIMESTAMP,
-    ended_by_guid       VARCHAR(36) REFERENCES users(guid)   -- patient OR relative
-);
-
-CREATE UNIQUE INDEX uq_patient_relative_active
-    ON patient_relative_grants (patient_guid, relative_user_guid)
-    WHERE ended_at IS NULL;
+-- 3. THE GRANT DOES NOT LIVE HERE. Corrected 2026-11-02: #889 requires it
+--    beside patient_consents, an ips table. It is
+--    ips.pdhc/gateway/migrations/add_patient_proxy_grants.sql, shipped with
+--    #889, and sso holds identity only.
+--
+--    The invite-token flow of §2 still belongs on the sso side, because it is
+--    how the relative's ACCOUNT comes into being; the grant that account is
+--    then bound to is ips's row.
 ```
+
+**What #889 actually built, for cross-reference:** `patient_proxy_grants` with
+`valid_from`/`valid_to` (both ends, EPS C1), `revoked_at`/`revoked_by_role`
+(either party, A3), and **no** database UNIQUE over
+(patient, proxy) — uniqueness of the ACTIVE grant is enforced at the API layer,
+because a UNIQUE would make revocation terminal for that pair for ever (#891).
 
 `fhir_resource_type` is `RelatedPerson`, which is FHIR R5's own resource for
 exactly this role — consistent with `Patient.FHIR_RESOURCE_TYPE` (`patient.py:23`)

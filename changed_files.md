@@ -437,3 +437,7 @@ All edited files listed with full path (Rule 17).
   migration applied, no code changed.
 - Incidental finding filed as #904 (patient self-registration unauthenticated,
   promised config gate absent). Not fixed here.
+- plans/eps_relative_identity.md — CORRECTED while implementing #889: the
+  grant lives in ips (beside patient_consents, as #889 requires), not in sso.
+  sso holds identity only, so the blob carries no patient_guid and needs no
+  new field; ips's AuditLog already separates actor from subject.
