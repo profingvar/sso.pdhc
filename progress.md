@@ -892,3 +892,41 @@ like "wrong password" rather than a deploy fault. Checked rather than assumed:
 
 Follow-up worth a ticket: pin these dependencies, or accept that every rebuild
 of the platform's auth service is also an unreviewed dependency upgrade.
+
+## EPS C3a — #890 answered (2026-11-02)
+
+Decision document: `plans/eps_relative_identity.md`. **No code and no schema
+change** — #890 is a decision ticket, and the migration it specifies is
+operator-applied per Rule 12/19.
+
+The four answers:
+
+1. **`user_type`**: a third ENUM member `'relative'`, plus a `Relative` profile
+   table. Not a synthetic blob like `partner` — `partner` works that way because
+   it is a *machine* (client-secret auth); a human login needs `password_hash`,
+   `status`, `force_change_on_next_login`, `password_changed_at` and
+   `token_revocation_epoch`, all of which exist only on `users`.
+2. **Verification**: the account is exactly as weak as a patient's —
+   `/api/patient/register` is unauthenticated and its promised config gate does
+   not exist (filed as **#904**). So the authority sits in the *grant*, not the
+   account: a 256-bit invite token hashed at rest plus a code spoken out of
+   band, the pattern onboard.pdhc already uses for its provider window.
+3. **Organisation**: none, and the blob OMITS `organization_ids` rather than
+   sending `[]` — which is what the patient branch already does, so consumers
+   already tolerate it. The grant does not widen org scope; it resolves the
+   relative to the patient, whose own path is not org-scoped at all.
+4. **Revocation**: three existing mechanisms carry over unchanged; the fourth
+   (ending the grant) holds #890's property **only** if the grant is resolved
+   from the DB inside `build_access_blob` on every request and never baked into
+   the JWT.
+
+Operator ruling recorded (A3, #879): **both parties may REDUCE access; only the
+patient may INCREASE it.**
+
+Unblocks #889 (EPS C3) and should reduce its estimate: read-as-patient needs no
+new branch in ips's `care_access_policy`, only the blob fields and the audit
+distinction between actor (`user_guid`) and subject (`patient_guid`).
+
+Control run: all 18 `file:line` citations in the document were verified by
+reading each cited line. **Four were wrong** (off by one or two) and were
+corrected, then re-verified.

@@ -427,3 +427,13 @@ All edited files listed with full path (Rule 17).
 /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/user-guide.md
 /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/admin-manual.md
 /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/architecture.md
+
+## 2026-11-02 — EPS C3a (#890): relative identity decision
+- plans/eps_relative_identity.md (new) — answers #890's four questions.
+  Measured: user_type is a 2-member enum (user.py:18) while the blob already
+  carries 'partner' (partners.py:282) synthetically. Decision: 'relative'
+  becomes a third ENUM member, because a human login needs five columns that
+  live only on `users`. Schema sketch for the operator (Rule 12/19); no
+  migration applied, no code changed.
+- Incidental finding filed as #904 (patient self-registration unauthenticated,
+  promised config gate absent). Not fixed here.
