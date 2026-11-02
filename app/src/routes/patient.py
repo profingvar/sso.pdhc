@@ -19,12 +19,32 @@ def register():
 
     Creates user (type=patient) + patient row.
     Requires: email, password, personnummer (12 digits), organisation_guid.
-    Dev-mode only flag checked via config.
     Returns FHIR Patient-shaped response.
+
+    UNAUTHENTICATED BY DESIGN, and that is now stated rather than implied
+    (#904). This docstring used to promise "Dev-mode only flag checked via
+    config", and no such flag existed anywhere in `app/src` — `config` was
+    assigned on the next line and never read. That is the #804 shape: a
+    docstring advertising a capability that is not there, which is worse than
+    silence because it stops the next reader looking.
+
+    Self-enrolment IS intended production behaviour. Measured 2026-11-02:
+    `frontend.register_patient` serves `register_patient.html` at
+    `/register-patient` with no decorator at all and a docstring reading
+    "Patient self-registration". So there are TWO anonymous enrolment paths,
+    this one being the better protected of the two because it at least carries
+    a rate limit. #904 asked whether self-enrolment was intended; the UI
+    answers it.
+
+    PERSONNUMMER IS DELIBERATELY NOT CHECKSUM-VALIDATED. Do not "harden" this
+    by adding a Luhn check. The platform requires synthetic personnummer to
+    carry an INVALID checksum (#405 confinement), so a checksum check would
+    reject every synthetic patient the platform creates on purpose — including
+    this module's own tests, whose `199001011234` and `200101011234` both fail
+    Luhn by design. The 12-digit shape check is the whole of the intended
+    validation.
     """
-    from flask import current_app
     session = get_db()
-    config = current_app.config
 
     data = request.get_json() if request.is_json else request.form.to_dict()
 

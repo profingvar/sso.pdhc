@@ -441,3 +441,16 @@ All edited files listed with full path (Rule 17).
   grant lives in ips (beside patient_consents, as #889 requires), not in sso.
   sso holds identity only, so the blob carries no patient_guid and needs no
   new field; ips's AuditLog already separates actor from subject.
+
+## 2026-11-02 — #904: patient self-enrolment, measured and corrected
+- app/src/routes/patient.py — the dead `config = current_app.config` deleted
+  (assigned, never read) and the docstring's promise of a "Dev-mode only flag
+  checked via config" removed: no such flag existed anywhere in app/src. It now
+  states that the route is unauthenticated BY DESIGN, and that personnummer is
+  deliberately not checksum-validated (#405 confinement).
+- app/src/routes/frontend.py — `register_patient` had NO decorator at all, not
+  even a rate limit, while the JSON route had one. Given the same
+  `@rate_limit(10/60s)`; `rate_limit` imported.
+- app/tests/test_self_registration_904.py (new) — 12 checks. 370 -> 382.
+- Filed #910: the duplicate enrolment paths and the anonymous organisation
+  listing.

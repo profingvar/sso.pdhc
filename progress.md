@@ -930,3 +930,64 @@ distinction between actor (`user_guid`) and subject (`patient_guid`).
 Control run: all 18 `file:line` citations in the document were verified by
 reading each cited line. **Four were wrong** (off by one or two) and were
 corrected, then re-verified.
+
+## #904 — self-enrolment is INTENDED; the docstring was the defect (2026-11-02)
+
+**382 passing**, from 370. Three controls, each failing on its own assertion.
+
+### Step 1 answered itself, and it inverts the ticket's step 2
+
+#904 said everything depended on whether patient self-enrolment is intended in
+production. Measured: `frontend.register_patient` serves
+`register_patient.html` at `/register-patient`, its docstring reads "Patient
+self-registration", and it had **no decorator at all**. So self-enrolment is
+intended, by two anonymous paths — and the path with a user interface was the
+LESS protected of the two, since the JSON route at least carried a rate limit.
+
+That makes #904's step 2 — "implement the flag the docstring promises, default
+closed" — the wrong fix. It would break a real feature. What replaced it is a
+matching rate limit on the HTML route, not a gate.
+
+### The most important thing this ticket established is a NON-change
+
+#904 observed, neutrally, that no checksum validation exists. **Acting on that
+would be a defect.** The platform requires synthetic personnummer to carry an
+INVALID checksum (#405 confinement), so a Luhn check would reject every
+synthetic patient the platform creates on purpose — including this module's own
+`199001011234` and `200101011234`, both of which fail Luhn by design.
+
+So `test_an_invalid_checksum_is_ACCEPTED` is not a lax test; it is the
+confinement rule made enforceable. A source guard refuses a Luhn
+implementation, and control 1 added the "obvious" hardening and failed both.
+
+### Step 3
+
+The dead `config = current_app.config` is gone, and the docstring no longer
+promises a flag that exists nowhere in `app/src` — verified by searching for
+four plausible names, none present.
+
+### Three of my own test bugs, and two were the same mistake
+
+- I picked `200202021234` as a Luhn-FAILING number. It passes. The test's own
+  premise guard caught it, which is what a premise guard is for.
+- A source guard searching for "luhn"/"checksum" matched **the route's own
+  docstring explaining why there is no checksum**. Fixed by parsing with `ast`
+  and dropping every docstring first.
+- A test asserting the phrase "Dev-mode only flag" was absent from the
+  docstring failed, because the new docstring QUOTES the old promise while
+  explaining it was false. Asserting the absence of a phrase cannot distinguish
+  a claim from a correction, so it now asserts the property: the function reads
+  no config flag.
+
+The last two are one instrument error made twice in a single file — a guard
+that matches the comment explaining the guard, which is #843's lesson wearing
+different clothes.
+
+### Left alone deliberately, filed as #910
+
+The enumeration oracle (both paths reveal whether a personnummer is enrolled)
+is rate-limited and otherwise untouched, with a test pinning its current
+behaviour: a registration form that cannot say "already registered" cannot be
+used. The anonymous GET publishing every organisation's guid, and the duplicate
+enrolment implementations, are #910 — both about the same two routes, so they
+want fixing together.

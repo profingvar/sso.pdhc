@@ -19,6 +19,7 @@ from src.services.jwt_service import issue_token, validate_token, revoke_token
 from src.services.jwt_service import TokenExpiredError, TokenInvalidError, TokenRevokedError
 from src.services.auth_service import authenticate_user, hash_password, verify_password
 from src.services.audit_log import audit
+from src.middleware.rate_limit import rate_limit
 
 frontend_bp = Blueprint('frontend', __name__, template_folder='../templates')
 
@@ -1714,8 +1715,26 @@ def group_admin_revoke_phase():
 # ---------------------------------------------------------------------------
 
 @frontend_bp.route('/register-patient', methods=['GET', 'POST'])
+@rate_limit(max_requests=10, window_seconds=60)
 def register_patient():
-    """Patient self-registration."""
+    """Patient self-registration — UNAUTHENTICATED BY DESIGN.
+
+    #904 measured that this route had NO decorator at all, not even a rate
+    limit, while the equivalent JSON route (`routes/patient.py::register`)
+    carried `@rate_limit(10/60s)`. Two implementations of one enrolment, and
+    the one with a UI was the less protected. The limit is now the same on
+    both: a human registers once, so ten a minute inconveniences nobody real.
+
+    This is a rate limit and NOT a gate. Self-enrolment is intended — this
+    page and its template are the evidence — so gating it would break the
+    feature rather than close a hole.
+
+    Two things measured here that are NOT fixed and are tracked separately:
+    this GET hands every organisation's guid and name to an anonymous caller
+    because the form needs a list to pick from, and the duplicate-enrolment
+    paths can drift. Personnummer is deliberately not checksum-validated; see
+    the note in `routes/patient.py::register` before adding one.
+    """
     db = get_db()
     from src.models.organisation import Organisation
     orgs = db.query(Organisation).all()
