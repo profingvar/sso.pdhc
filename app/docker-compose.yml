@@ -27,7 +27,13 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://sso_user:${DB_PASSWORD}@db:5432/sso_db
+      # +psycopg2 is EXPLICIT and load-bearing (#711, #930): a bare
+      # `postgresql://` lets the INSTALLED SQLAlchemy pick the driver, and
+      # 2.1 resolves it to psycopg v3, which is not installed here.
+      # SQLAlchemy==2.1.3 — ALREADY on the release #711 is about, so a
+      # `--build` from this file would have crash-looped sso, the platform's
+      # auth service. The most load-bearing of the seven.
+      DATABASE_URL: postgresql+psycopg2://sso_user:${DB_PASSWORD}@db:5432/sso_db
     env_file:
       - .env
     ports:

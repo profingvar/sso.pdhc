@@ -454,3 +454,33 @@ All edited files listed with full path (Rule 17).
 - app/tests/test_self_registration_904.py (new) — 12 checks. 370 -> 382.
 - Filed #910: the duplicate enrolment paths and the anonymous organisation
   listing.
+
+#930 — bare `postgresql://` DSN converted to `+psycopg2` (2026-11-05)
+---------------------------------------------------------------------
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/docker-compose.yml:30
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/.env.example:15
+
+THE ONLY SERVICE OF THE SEVEN THAT WAS ACTUALLY AT RISK. `SQLAlchemy==2.1.3` — already on the
+release #711 is about, so a `--build` from this compose would have
+crash-looped sso, the platform's auth service, and #711's own note says that
+exact scenario would have dropped platform authentication with no obvious
+cause. It was found by accident on analyse instead.
+
+Repo edit only. sso's deploy and its `.env` are outside Claude's
+authorization envelope (CLAUDE.md §15, sso's Rule 12/19) — operator-only.
+
+WHY. SQLAlchemy 2.1 resolves a bare `postgresql://` to psycopg **v3** (#711).
+This service installs `psycopg2-binary` and not psycopg v3, so a bare scheme
+lets the INSTALLED SQLAlchemy pick a driver that is absent and the app
+crash-loops on the next `--build`. Verified it passes nothing to a raw
+`psycopg2.connect()` (which cannot parse a `+driver` scheme) — the DSN goes to
+SQLAlchemy only.
+
+NOT DEPLOYED and nothing regresses without it: a config-only compose change
+needs `docker-compose up -d` WITHOUT `--build`. The deployed compose still has
+to be compared (#940) — gateway's deployed copy already said `+psycopg2` while its
+repo copy did not, which is how this drift was found at all.
+
+Guarded by `tools/audit_dsn_drivers.py` (exit 1 on any bare DSN, 20 paired
+tests). The claim "all 21 services now use +psycopg2 explicitly (#711)" was
+false for 11 files; a hand survey cannot be the gate here.
