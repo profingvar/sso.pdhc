@@ -27,6 +27,10 @@ from src.services.affiliation_service import ORTHOGONAL_PHASES
 MISSING_AFFILIATION = 'no_active_affiliation'
 MISSING_USEFUL_PHASE = 'no_useful_phase_grant'
 MISSING_RESEARCH_PROJECTS = 'researcher_affiliation_missing_projects'
+# Main rule 2026-11-13: employed by >=1 vårdgivare, and every affiliation
+# under one of them.
+MISSING_EMPLOYMENT = 'no_employment'
+AFFILIATION_OUTSIDE_EMPLOYMENT = 'affiliation_outside_employment'
 
 
 def is_activated(user) -> bool:
@@ -69,6 +73,13 @@ def completeness(session, user) -> dict:
 
     useful = sorted(granted & permitted)
 
+    from src.services.employment_service import (
+        employer_guids, affiliation_outside_employment)
+    if not employer_guids(session, user.guid):
+        missing.insert(0, MISSING_EMPLOYMENT)
+    elif any(affiliation_outside_employment(session, user.guid, a.care_unit_guid)
+             for a in affs):
+        missing.append(AFFILIATION_OUTSIDE_EMPLOYMENT)
     if not affs:
         missing.insert(0, MISSING_AFFILIATION)
     if not useful:

@@ -1256,6 +1256,59 @@ def update_oath_overview():
 # the guided UI renders the same `missing` list the API computes.
 
 
+@admin_bp.route('/users/<user_guid>/employments', methods=['GET'])
+@require_auth
+@require_su
+def list_user_employments(user_guid):
+    """GET /api/admin/users/<guid>/employments — the vårdgivare a person is
+    employed by (main rule 2026-11-13)."""
+    from src.services.employment_service import employments_for_blob
+    from src.models.employment import Employment
+    session = get_db()
+    rows = session.query(Employment).filter_by(person_guid=user_guid).all()
+    names = {e['caregiver_guid']: e['caregiver_name']
+             for e in employments_for_blob(session, user_guid)}
+    return jsonify({'employments': [r.to_dict(names.get(r.caregiver_guid)) for r in rows]}), 200
+
+
+@admin_bp.route('/users/<user_guid>/employments', methods=['POST'])
+@require_auth
+@require_su
+def create_user_employment(user_guid):
+    """POST /api/admin/users/<guid>/employments  body {caregiver_guid}.
+    The rule is employment_service.add_employment (shared with the SU forms)."""
+    from src.services.employment_service import add_employment, EmploymentRefused
+    session = get_db()
+    caller = g.current_user
+    caregiver_guid = ((request.get_json(silent=True) or {}).get('caregiver_guid') or '').strip()
+    try:
+        emp, org = add_employment(session, user_guid, caregiver_guid, caller.guid)
+    except EmploymentRefused as e:
+        return jsonify({"error": e.error, "message": e.message, **e.extra}), e.status
+    audit('employment_create', user_guid=caller.guid,
+          detail={'person_guid': user_guid, 'employment_guid': emp.guid,
+                  'caregiver_guid': caregiver_guid}, ip=request.remote_addr)
+    return jsonify(emp.to_dict(org.name)), 201
+
+
+@admin_bp.route('/users/<user_guid>/employments/<employment_guid>', methods=['DELETE'])
+@require_auth
+@require_su
+def delete_user_employment(user_guid, employment_guid):
+    """Refused while an ACTIVE affiliation depends on the employment."""
+    from src.services.employment_service import remove_employment, EmploymentRefused
+    session = get_db()
+    caller = g.current_user
+    try:
+        caregiver_guid = remove_employment(session, user_guid, employment_guid)
+    except EmploymentRefused as e:
+        return jsonify({"error": e.error, "message": e.message, **e.extra}), e.status
+    audit('employment_delete', user_guid=caller.guid,
+          detail={'person_guid': user_guid, 'employment_guid': employment_guid,
+                  'caregiver_guid': caregiver_guid}, ip=request.remote_addr)
+    return jsonify({"deleted": employment_guid}), 200
+
+
 @admin_bp.route('/users/<user_guid>/affiliations', methods=['GET'])
 @require_auth
 @require_su
@@ -1326,6 +1379,17 @@ def create_user_affiliation(user_guid):
     if role is None:
         return jsonify({"error": "invalid_request",
                         "message": "role_guid not in the role registry"}), 400
+
+    # Main rule (operator 2026-11-13): an affiliation may only target a care
+    # unit under a vårdgivare the person is EMPLOYED by.
+    from src.services.employment_service import affiliation_outside_employment
+    outside = affiliation_outside_employment(session, user_guid, care_unit_guid)
+    if outside:
+        audit('affiliation_refused_outside_employment', user_guid=caller.guid,
+              detail={'person_guid': user_guid, 'care_unit_guid': care_unit_guid,
+                      'reason': outside}, ip=request.remote_addr)
+        return jsonify({"error": "affiliation_outside_employment",
+                        "message": outside}), 409
 
     if role.code == 'researcher':
         if not project_guids:

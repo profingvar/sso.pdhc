@@ -484,3 +484,32 @@ repo copy did not, which is how this drift was found at all.
 Guarded by `tools/audit_dsn_drivers.py` (exit 1 on any bare DSN, 20 paired
 tests). The claim "all 21 services now use +psycopg2 explicitly (#711)" was
 false for 11 files; a hand survey cannot be the gate here.
+
+## 2026-11-13 — employment model: EMPLOYED by vårdgivare, AFFILIATED to units
+
+Operator main rule 2026-11-13: a professional is employed by one or more
+vårdgivare and may only be affiliated to a vårdenhet under one of them. The
+vårdenhet is the basis for seeing patients (request, gateway, cdr1, dashboard).
+
+- app/src/models/employment.py (NEW) — `employments` table (person × vårdgivare)
+- app/src/models/__init__.py — registers Employment
+- app/src/services/employment_service.py (NEW) — caregiver_of, employer_guids,
+  affiliation_outside_employment, employments_for_blob, add/remove_employment
+  (shared by API and SU forms), backfill_employments
+- app/src/routes/admin.py — GET/POST/DELETE /api/admin/users/<g>/employments;
+  POST affiliations refused 409 `affiliation_outside_employment`
+- app/src/routes/frontend.py — SU page carries employments + affiliations;
+  /admin/assign-employment, /admin/remove-employment
+- app/src/templates/su_admin.html — "+ Org" → "+ Anställning" (vårdgivare only);
+  affiliations shown as unit · role; memberships shown as legacy; S9 unit
+  picker filtered to units under the person's employers, grouped
+- app/src/services/auth_service.py — blob carries `employments`
+- app/src/services/activation_service.py — completeness: `no_employment`,
+  `affiliation_outside_employment`
+- app/scripts/backfill_employments.py (NEW) — DEPLOY STEP, dry run by default
+- app/tests/test_employment_rule.py, test_employment_ui.py,
+  test_employment_backfill.py (NEW); test_models.py, test_s9_signon.py,
+  test_sso_reform_784.py adjusted. Full suite 410 passed.
+
+NOT DEPLOYED (operator). After deploy: backfill dry run → --apply; then the sim
+users get an employment at Sim_klinik + an affiliation to Sim_vårdgivare.

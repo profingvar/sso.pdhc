@@ -39,6 +39,7 @@ class TestAllTablesCreated:
         'roles',  # reform S2 #398: role registry
         'research_projects',  # reform S4 #400: research-project registry
         'affiliations',  # reform S3 #399: person<->care_unit<->role
+        'employments',  # main rule 2026-11-13: person employed by vårdgivare
     ]
 
     def test_all_tables_exist(self, db_session):

@@ -213,7 +213,10 @@ class TestOrganisationShownByName:
         # find the CSS rule of the same name first, and a slice of the
         # stylesheet trivially contains neither the name nor the guid --
         # an assertion that passes for the wrong reason.
-        chip = html[html.index('class="org-chip"'):][:400]
+        # 2026-11-13: memberships are now shown as LEGACY chips (the main
+        # rule makes affiliations the access basis), so the chip's class is
+        # `org-chip org-chip-legacy`. The B5 regression is unchanged.
+        chip = html[html.index('class="org-chip org-chip-legacy"'):][:400]
         assert 'Akademiska Sjukhuset' in chip
         assert org_guid[:8] + '…' not in chip
 
@@ -228,7 +231,9 @@ class TestOrganisationShownByName:
                                    organisation_guid='dead-org-guid-0000'))
             s.commit()
         html = client.get('/admin').data.decode()
-        assert 'unknown org' in html
+        # Swedish since 2026-11-13, like the rest of the employment column.
+        chip = html[html.index('class="org-chip org-chip-legacy"'):][:400]
+        assert '(okänd dead-org…)' in chip
 
 
 # --------------------------------------------------- C1: organisation tree

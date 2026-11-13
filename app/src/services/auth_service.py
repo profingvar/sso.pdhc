@@ -122,6 +122,7 @@ def build_access_blob(user, session, session_id=None):
             blob['effective_phases'] = []
             blob['affiliations'] = []
             blob['active_affiliation_guid'] = None
+            blob['employments'] = []
             blob['session_phases'] = []
             return _finalize_blob(blob)
         blob['activation_pending'] = False
@@ -207,6 +208,10 @@ def build_access_blob(user, session, session_id=None):
         )
         from src.models.role import Role as _Role
         blob['affiliations'] = build_affiliations_for_blob(session, user.guid)
+        # Main rule 2026-11-13: who the person is EMPLOYED by (one or more
+        # vårdgivare). Informational - patient scope stays affiliations' units.
+        from src.services.employment_service import employments_for_blob
+        blob['employments'] = employments_for_blob(session, user.guid)
         # Active affiliation: default to the sole one when exactly one exists;
         # otherwise None (the session selects via the acting-as flow, S9).
         actives = active_affiliations(session, user.guid)

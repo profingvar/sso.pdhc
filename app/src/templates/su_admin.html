@@ -40,6 +40,16 @@
 .org-chip-x { background: none; border: none; color: var(--danger);
               cursor: pointer; font-size: 0.8rem; padding: 0 2px; line-height: 1; }
 .no-org { color: var(--danger); font-size: 0.75rem; font-weight: 600; }
+/* Employment (vårdgivare) and affiliation (vårdenhet · roll), 2026-11-13 */
+.emp-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.04em;
+             color: var(--text-muted, #6b7280); margin-top: 3px; }
+.emp-label:first-child { margin-top: 0; }
+.aff-chip { display: inline-block; background: #dbeafe; border-radius: 4px;
+            padding: 1px 6px; font-size: 0.75rem; margin: 1px 0; }
+.aff-chip.aff-suspended { background: #f3f4f6; color: #6b7280; text-decoration: line-through; }
+.legacy-memberships { margin-top: 3px; font-size: 0.7rem; color: var(--text-muted, #6b7280); }
+.legacy-memberships summary { cursor: pointer; }
+.org-chip-legacy { background: #f3f4f6; color: #6b7280; }
 
 /* --- #784 C1: organisation hierarchy ----------------------------------- */
 .org-table tr.org-caregiver > td { border-top: 2px solid var(--border); }
@@ -140,7 +150,7 @@
                    of a ten-column table. They describe one person, so they are
                    now one cell, one value per line. #}
                 <th>Person</th>
-                <th>Organisation</th>
+                <th>Anställning &amp; affilieringar</th>
                 <th>Phases</th>
                 <th>SU</th>
                 <th>Created</th>
@@ -168,47 +178,76 @@
                           onclick="navigator.clipboard && navigator.clipboard.writeText('{{ u.user_guid }}').then(function(){}, function(){});
                                    this.classList.add('copied'); var el=this; setTimeout(function(){el.classList.remove('copied');}, 700);">{{ u.user_guid[:8] }}…</code>
                 </td>
-                <td>
+                <td class="emp-cell">
+                    {#
+                      The main rule (2026-11-13): a professional is EMPLOYED by
+                      one or more vårdgivare and AFFILIATED to vårdenheter under
+                      them. Patient access follows the AFFILIATIONS. Employment is
+                      set here; affiliations in the S9 panel below. The old
+                      "+ Org" memberships are legacy and labelled as such.
+                    #}
                     {% if u.user_type == 'professional' %}
-                        {% for org_id in u.organization_ids %}
-                            {#
-                              #784 B5: the name used to be resolved with
-                              `{% set %}` inside a nested `{% for %}`. Jinja2
-                              scopes that assignment to the loop iteration, so
-                              the variable was always empty here and the cell
-                              ALWAYS rendered the truncated guid -- the code
-                              meant to show a name could never run. The route
-                              now passes an explicit guid -> name mapping.
-                            #}
-                            <span class="org-chip" title="{{ org_id }}">
-                                {{ org_names.get(org_id) or '(unknown org ' ~ org_id[:8] ~ '…)' }}
-                                <form method="post" action="/admin/remove-org" style="display:inline;margin:0;">
+                        {%- set employed = u.employments | map(attribute='caregiver_guid') | list -%}
+                        <div class="emp-label">Anställd av</div>
+                        {% for e in u.employments %}
+                            <span class="org-chip" title="{{ e.caregiver_guid }}">
+                                {{ org_names.get(e.caregiver_guid) or '(okänd ' ~ e.caregiver_guid[:8] ~ '…)' }}
+                                <form method="post" action="/admin/remove-employment" style="display:inline;margin:0;">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
-                                    <input type="hidden" name="organisation_guid" value="{{ org_id }}">
+                                    <input type="hidden" name="employment_guid" value="{{ e.employment_guid }}">
                                     <button type="submit" class="org-chip-x"
-                                            title="Remove {{ org_names.get(org_id) or 'this organisation' }} from {{ u.email }}">&times;</button>
+                                            title="Ta bort anställningen (nekas så länge en affiliering under vårdgivaren finns kvar)">&times;</button>
                                 </form>
                             </span>
                         {% endfor %}
-                        {% if not u.organization_ids %}
-                            <span class="no-org" title="This professional has no organisation, so org-scoped data (Rule 24) is empty for them.">No org</span>
+                        {% if not u.employments %}
+                            <span class="no-org" title="Utan anställning kan personen inte affilieras till någon vårdenhet.">Ingen anställning</span>
                         {% endif %}
-                        <form method="post" action="/admin/assign-org" style="display:inline-flex;gap:2px;align-items:center;margin-top:2px;">
+                        <form method="post" action="/admin/assign-employment" style="display:inline-flex;gap:2px;align-items:center;margin-top:2px;">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
-                            <select name="organisation_guid" style="font-size:0.7rem;padding:1px 4px;max-width:130px;" required
-                                    title="Add an organisation affiliation for {{ u.email }}">
-                                <option value="">+ Org</option>
+                            <select name="caregiver_guid" style="font-size:0.7rem;padding:1px 4px;max-width:150px;" required
+                                    title="Anställ {{ u.email }} hos en vårdgivare (bara vårdgivare listas)">
+                                <option value="">+ Anställning</option>
                                 {% for o in organisations %}
-                                    {% if o.organisation_guid not in u.organization_ids %}
+                                    {% if o.kind == 'care_organisation' and o.organisation_guid not in employed %}
                                     <option value="{{ o.organisation_guid }}">{{ o.name }}</option>
                                     {% endif %}
                                 {% endfor %}
                             </select>
-                            <button type="submit" class="btn btn-sm btn-secondary" style="padding:1px 6px;font-size:0.7rem;"
-                                    title="Assign the selected organisation">Add</button>
+                            <button type="submit" class="btn btn-sm btn-secondary" style="padding:1px 6px;font-size:0.7rem;">Add</button>
                         </form>
+
+                        <div class="emp-label">Affilierad till</div>
+                        {% for a in u.affiliations %}
+                            <span class="aff-chip{% if a.status != 'active' %} aff-suspended{% endif %}"
+                                  title="{{ a.care_unit_guid }}{% if a.status != 'active' %} — {{ a.status }}{% endif %}">
+                                {{ org_names.get(a.care_unit_guid) or '(okänd ' ~ a.care_unit_guid[:8] ~ '…)' }} · {{ a.role }}
+                            </span>
+                        {% endfor %}
+                        {% if not u.affiliations %}
+                            <span class="no-org" title="Sätts i panelen Activation &amp; Affiliations (S9).">Ingen affiliering</span>
+                        {% endif %}
+
+                        {% if u.organization_ids %}
+                        <details class="legacy-memberships">
+                            <summary>Äldre medlemskap ({{ u.organization_ids | length }}) —
+                                {% if u.affiliations %}ger ingen patientbehörighet{% else %}används som reserv eftersom affiliering saknas{% endif %}</summary>
+                            {% for org_id in u.organization_ids %}
+                                <span class="org-chip org-chip-legacy" title="{{ org_id }}">
+                                    {{ org_names.get(org_id) or '(okänd ' ~ org_id[:8] ~ '…)' }}
+                                    <form method="post" action="/admin/remove-org" style="display:inline;margin:0;">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
+                                        <input type="hidden" name="organisation_guid" value="{{ org_id }}">
+                                        <button type="submit" class="org-chip-x"
+                                                title="Ta bort medlemskapet">&times;</button>
+                                    </form>
+                                </span>
+                            {% endfor %}
+                        </details>
+                        {% endif %}
                     {% else %}
                         <span class="text-muted">—</span>
                     {% endif %}
@@ -323,14 +362,22 @@
     </div>
     <div id="s9-panel" style="display:none;margin-top:0.75rem;">
         <div id="s9-checklist" class="mb-1"></div>
+        <div style="font-size:0.8rem;font-weight:600;margin-top:0.5rem;">Anställd av (vårdgivare)</div>
+        <div id="s9-emps" style="font-size:0.78rem;margin:0.2rem 0;"></div>
+        <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-bottom:0.6rem;">
+            <select id="s9-cg" style="font-size:0.75rem;max-width:220px;"></select>
+            <button class="btn btn-sm btn-secondary" onclick="s9AddEmployment()">Lägg till anställning</button>
+        </div>
+        <div style="font-size:0.8rem;font-weight:600;">Affilierad till (vårdenheter under anställningarna)</div>
         <table>
             <thead><tr><th>Care unit</th><th>Role</th><th>Projects</th><th></th></tr></thead>
             <tbody id="s9-affs"></tbody>
         </table>
         <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem;">
-            <select id="s9-unit" style="font-size:0.75rem;max-width:200px;">
-                {% for o in organisations %}<option value="{{ o.organisation_guid }}">{{ o.name }}</option>{% endfor %}
-            </select>
+            {# Filled from the person's employments on Load: only vårdenheter
+               under a vårdgivare the person is employed by, grouped by
+               vårdgivare. The server enforces the same rule (409). #}
+            <select id="s9-unit" style="font-size:0.75rem;max-width:240px;"></select>
             <select id="s9-role" style="font-size:0.75rem;"></select>
             <select id="s9-projects" multiple size="2" style="font-size:0.75rem;display:none;max-width:200px;" title="Research projects (researcher only)"></select>
             <button class="btn btn-sm btn-primary" onclick="s9AddAffiliation()">Assign affiliation</button>
@@ -1116,7 +1163,15 @@
         no_active_affiliation: 'No active affiliation — assign at least one (CareUnit + Role).',
         no_useful_phase_grant: 'No phase grant the held role(s) can use — grant a phase via the Person Registry.',
         researcher_affiliation_missing_projects: 'A researcher affiliation lacks research projects.',
+        no_employment: 'Ingen anställning — anställ personen hos en vårdgivare först.',
+        affiliation_outside_employment: 'En affiliering ligger under en vårdgivare personen inte är anställd av.',
     };
+    // Every organisation with its place in the care hierarchy, for the
+    // employment and care-unit pickers.
+    const ORGS = {{ organisations | tojson }};
+    const ORG_NAME = Object.fromEntries(ORGS.map(o => [o.organisation_guid, o.name]));
+    const esc = t => String(t ?? '').replace(/[&<>"']/g,
+        c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[c]);
     let ROLES = [], PROJECTS = [];
 
     function hdrs() {
@@ -1154,6 +1209,9 @@
         const r = await fetch(`/api/admin/users/${guid()}/affiliations`, {headers: hdrs()});
         if (!r.ok) { msg('Load failed (' + r.status + ')', true); return; }
         const data = await r.json();
+        const re = await fetch(`/api/admin/users/${guid()}/employments`, {headers: hdrs()});
+        const emps = re.ok ? await re.json() : [];
+        renderEmployments(Array.isArray(emps) ? emps : (emps.employments || []));
         el('s9-panel').style.display = '';
         const c = data.completeness;
         el('s9-checklist').innerHTML =
@@ -1170,6 +1228,45 @@
                 onclick="s9DeleteAffiliation('${a.affiliation_guid}')">remove</button></td></tr>`).join('')
             || '<tr><td colspan="4" style="font-size:0.78rem;color:#6b7280;">none</td></tr>';
         msg('');
+    };
+
+    function renderEmployments(emps) {
+        const employed = new Set(emps.map(e => e.caregiver_guid));
+        el('s9-emps').innerHTML = emps.length
+            ? emps.map(e => `<span class="org-chip">${esc(e.caregiver_name || ORG_NAME[e.caregiver_guid] || e.caregiver_guid)}
+                 <button class="org-chip-x" title="Ta bort anställningen"
+                   onclick="s9DeleteEmployment('${esc(e.employment_guid)}')">&times;</button></span>`).join(' ')
+            : '<span style="color:#d97706;">Ingen anställning — personen kan inte affilieras ännu.</span>';
+        const free = ORGS.filter(o => o.kind === 'care_organisation' && !employed.has(o.organisation_guid));
+        el('s9-cg').innerHTML = '<option value="">Välj vårdgivare…</option>' +
+            free.map(o => `<option value="${esc(o.organisation_guid)}">${esc(o.name)}</option>`).join('');
+        const groups = emps.map(e => {
+            const units = ORGS.filter(o => o.kind === 'care_unit' && o.parent_caregiver_guid === e.caregiver_guid);
+            const label = esc(ORG_NAME[e.caregiver_guid] || e.caregiver_name || e.caregiver_guid);
+            return `<optgroup label="${label}">` + (units.length
+                ? units.map(u => `<option value="${esc(u.organisation_guid)}">${esc(u.name)}</option>`).join('')
+                : '<option disabled>(inga vårdenheter)</option>') + '</optgroup>';
+        });
+        el('s9-unit').innerHTML = groups.join('') ||
+            '<option value="" disabled selected>Anställ först</option>';
+    }
+
+    window.s9AddEmployment = async function() {
+        const cg = el('s9-cg').value;
+        if (!cg) return;
+        const r = await fetch(`/api/admin/users/${guid()}/employments`,
+                              {method: 'POST', headers: hdrs(), body: JSON.stringify({caregiver_guid: cg})});
+        const d = await r.json();
+        msg(r.ok ? 'Anställning tillagd.' : (d.message || 'failed'), !r.ok);
+        if (r.ok) s9Load();
+    };
+
+    window.s9DeleteEmployment = async function(empGuid) {
+        const r = await fetch(`/api/admin/users/${guid()}/employments/${empGuid}`,
+                              {method: 'DELETE', headers: hdrs()});
+        const d = r.ok ? {} : await r.json();
+        msg(r.ok ? 'Anställning borttagen.' : (d.message || 'Remove failed.'), !r.ok);
+        if (r.ok) s9Load();
     };
 
     window.s9AddAffiliation = async function() {

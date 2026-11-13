@@ -37,6 +37,11 @@ def s9(seeded_app, app):
                     status='pending')
         s.add(pend)
         s.flush()
+        # Main rule 2026-11-13: a person is EMPLOYED by the vårdgivare before
+        # being affiliated to its units. "Test Hospital" has no parent, so it
+        # is its own vårdgivare (and its own unit).
+        from src.models.employment import Employment
+        s.add(Employment(person_guid=pend.guid, caregiver_guid=seeded_app['org_guid']))
         data = dict(seeded_app)
         data['pending_guid'] = pend.guid
         data['proj_guid'] = proj.guid

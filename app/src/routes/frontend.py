@@ -455,6 +455,8 @@ def admin_page():
             'created_at': u.created_at.isoformat() if u.created_at else '',
             'first_name': '', 'last_name': '', 'professional_role': '',
             'personnummer': '', 'organization_ids': [],
+            'employments': [],         # list[{employment_guid, caregiver_guid}]
+            'affiliations': [],        # list[{care_unit_guid, role, status}]
             'direct_phases': [],       # list[str]
             'group_phases': [],        # list[{'phase': str, 'group_name': str}]
         }
@@ -467,6 +469,20 @@ def admin_page():
             # Load org assignments
             user_orgs = db.query(UserOrganisation).filter_by(user_guid=u.guid).all()
             entry['organization_ids'] = [uo.organisation_guid for uo in user_orgs]
+            # The main rule (2026-11-13): EMPLOYED by vårdgivare, AFFILIATED to
+            # vårdenheter. Only affiliations grant patient access; the
+            # memberships above are legacy and shown as such.
+            from src.models.employment import Employment
+            from src.models.affiliation import Affiliation
+            from src.models.role import Role
+            entry['employments'] = [
+                {'employment_guid': e.guid, 'caregiver_guid': e.caregiver_guid}
+                for e in db.query(Employment).filter_by(person_guid=u.guid).all()]
+            for a in db.query(Affiliation).filter_by(person_guid=u.guid).all():
+                role = db.query(Role).filter_by(guid=a.role_guid).first()
+                entry['affiliations'].append({
+                    'care_unit_guid': a.care_unit_guid, 'status': a.status,
+                    'role': (role.display_name or role.code) if role else '?'})
 
             # Ticket #46: direct phase grants
             if _user_phase_available:
@@ -1020,6 +1036,50 @@ def admin_assign_org():
           detail={'target_guid': user_guid, 'org_guid': org_guid, 'org_name': org.name},
           ip=request.remote_addr)
     flash(f'Assigned {target.email} to {org.name}.', 'success')
+    return redirect(url_for('frontend.admin_page'))
+
+
+@frontend_bp.route('/admin/assign-employment', methods=['POST'])
+@_require_su_login
+def admin_assign_employment():
+    """Employ a professional by a vårdgivare. Same rule as the JSON API
+    (employment_service.add_employment)."""
+    from src.services.employment_service import add_employment, EmploymentRefused
+    user = _get_session_user()
+    db = get_db()
+    user_guid = request.form.get('user_guid', '').strip()
+    caregiver_guid = request.form.get('caregiver_guid', '').strip()
+    try:
+        emp, org = add_employment(db, user_guid, caregiver_guid, user.guid)
+    except EmploymentRefused as e:
+        flash(e.message, 'error')
+        return redirect(url_for('frontend.admin_page'))
+    audit('employment_create', user_guid=user.guid,
+          detail={'person_guid': user_guid, 'employment_guid': emp.guid,
+                  'caregiver_guid': caregiver_guid}, ip=request.remote_addr)
+    flash(f'Employed by {org.name}.', 'success')
+    return redirect(url_for('frontend.admin_page'))
+
+
+@frontend_bp.route('/admin/remove-employment', methods=['POST'])
+@_require_su_login
+def admin_remove_employment():
+    """Refused while an active affiliation under that vårdgivare remains."""
+    from src.services.employment_service import remove_employment, EmploymentRefused
+    user = _get_session_user()
+    db = get_db()
+    user_guid = request.form.get('user_guid', '').strip()
+    employment_guid = request.form.get('employment_guid', '').strip()
+    try:
+        caregiver_guid = remove_employment(db, user_guid, employment_guid)
+    except EmploymentRefused as e:
+        n = len(e.extra.get('affiliation_guids') or [])
+        flash(e.message + (f' ({n} affiliation(s))' if n else ''), 'error')
+        return redirect(url_for('frontend.admin_page'))
+    audit('employment_delete', user_guid=user.guid,
+          detail={'person_guid': user_guid, 'employment_guid': employment_guid,
+                  'caregiver_guid': caregiver_guid}, ip=request.remote_addr)
+    flash('Employment removed.', 'success')
     return redirect(url_for('frontend.admin_page'))
 
 

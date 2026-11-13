@@ -17,10 +17,12 @@ from src.models.user_phase import UserPhase
 from src.models.role import Role
 from src.models.research_project import ResearchProject
 from src.models.affiliation import Affiliation
+# Main rule 2026-11-13: a person is employed by one or more vårdgivare.
+from src.models.employment import Employment
 
 __all__ = [
     'User', 'Patient', 'Professional', 'Organisation', 'OrganisationAudit',
     'UserOrganisation', 'Group', 'Membership', 'GroupProposal',
     'LeaderRequest', 'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',
-    'Role', 'ResearchProject', 'Affiliation',
+    'Role', 'ResearchProject', 'Affiliation', 'Employment',
 ]
