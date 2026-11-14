@@ -41,9 +41,15 @@ services:
       - .env
     volumes:
       # #997: the audit log on the HOST. In the container's own filesystem it
-      # was erased by every deploy. ../shared survives a redeploy of app/;
-      # keep it 700 (miserver has three local accounts, #835).
-      - ../shared/logs:/app/logs
+      # was erased by every deploy. Keep the directory 700 (miserver has
+      # three local accounts, #835).
+      #
+      # COLIMA SHARES ONLY $HOME WITH ITS VM (mounts: [] in colima.yaml). A
+      # source outside it — /usr/local/www/... — is created INSIDE the VM,
+      # silently: the container writes, the Mac never sees the file and no
+      # host backup holds it. Production sets SSO_LOG_HOST_DIR under
+      # /Users/miserver (measured 2026-11-14 with a probe file).
+      - ${SSO_LOG_HOST_DIR:-../shared/logs}:/app/logs
     ports:
       - "127.0.0.1:9000:9000"
     healthcheck:
