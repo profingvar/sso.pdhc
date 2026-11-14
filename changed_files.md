@@ -513,3 +513,10 @@ vårdenhet is the basis for seeing patients (request, gateway, cdr1, dashboard).
 
 NOT DEPLOYED (operator). After deploy: backfill dry run → --apply; then the sim
 users get an employment at Sim_klinik + an affiliation to Sim_vårdgivare.
+
+## 2026-11-14 — #997: audit log on a host volume, one append-only file per day
+- app/src/services/audit_log.py — DailyAppendHandler (audit-YYYY-MM-DD.log, O_APPEND, 0600, 90-day prune) replaces TimedRotatingFileHandler, whose midnight rename collides across gunicorn workers
+- app/docker-compose.yml — app mounts ../shared/logs:/app/logs; ports bound to 127.0.0.1 to match production (the repo bound all interfaces)
+- app/tests/test_audit_log_997.py (NEW); app/tests/test_core.py — reads the dated file
+- .gitignore — shared/
+Survey: sso_app is the only service with a FILE audit log; the rest keep audit in Postgres on a volume.

@@ -253,8 +253,10 @@ class TestAuditLog:
             for handler in logger.handlers:
                 handler.flush()
 
-            log_path = os.path.join(tmpdir, 'audit.log')
-            assert os.path.exists(log_path)
+            # #997: one append-only file per UTC day, not a renamed audit.log.
+            dated = [n for n in os.listdir(tmpdir) if n.startswith('audit-') and n.endswith('.log')]
+            assert len(dated) == 1, os.listdir(tmpdir)
+            log_path = os.path.join(tmpdir, dated[0])
             with open(log_path) as f:
                 line = f.readline()
                 entry = json.loads(line)

@@ -9,8 +9,11 @@ services:
       POSTGRES_USER: sso_user
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
       POSTGRES_DB: sso_db
+    # 127.0.0.1: matches production. The repo said "9003:5432", i.e. every
+    # interface, so a deploy from the repo would have put sso's database on
+    # the LAN (#997 found the drift).
     ports:
-      - "9003:5432"
+      - "127.0.0.1:9003:5432"
     volumes:
       - sso_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -36,8 +39,13 @@ services:
       DATABASE_URL: postgresql+psycopg2://sso_user:${DB_PASSWORD}@db:5432/sso_db
     env_file:
       - .env
+    volumes:
+      # #997: the audit log on the HOST. In the container's own filesystem it
+      # was erased by every deploy. ../shared survives a redeploy of app/;
+      # keep it 700 (miserver has three local accounts, #835).
+      - ../shared/logs:/app/logs
     ports:
-      - "9000:9000"
+      - "127.0.0.1:9000:9000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/api/health')"]
       interval: 10s

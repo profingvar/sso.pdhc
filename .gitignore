@@ -33,3 +33,4 @@ logs/
 
 # Deploy artifacts (predeploy tarballs live in ~/backups/predeploy, not the repo)
 *_deploy_*.tar.gz
+shared/
