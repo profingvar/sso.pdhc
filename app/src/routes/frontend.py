@@ -997,48 +997,6 @@ def admin_set_org_parent():
     return redirect(url_for('frontend.admin_page'))
 
 
-@frontend_bp.route('/admin/assign-org', methods=['POST'])
-@_require_su_login
-def admin_assign_org():
-    user = _get_session_user()
-    db = get_db()
-    user_guid = request.form.get('user_guid', '').strip()
-    org_guid = request.form.get('organisation_guid', '').strip()
-
-    if not user_guid or not org_guid:
-        flash('User and organisation required.', 'error')
-        return redirect(url_for('frontend.admin_page'))
-
-    from src.models.user import User
-    from src.models.organisation import Organisation
-    from src.models.user_organisation import UserOrganisation
-
-    target = db.query(User).filter_by(guid=user_guid).first()
-    org = db.query(Organisation).filter_by(guid=org_guid).first()
-    if not target or not org:
-        flash('User or organisation not found.', 'error')
-        return redirect(url_for('frontend.admin_page'))
-
-    if target.user_type != 'professional':
-        flash('Only professionals can be assigned to organisations.', 'error')
-        return redirect(url_for('frontend.admin_page'))
-
-    existing = db.query(UserOrganisation).filter_by(
-        user_guid=user_guid, organisation_guid=org_guid
-    ).first()
-    if existing:
-        flash('User already assigned to this organisation.', 'error')
-        return redirect(url_for('frontend.admin_page'))
-
-    uo = UserOrganisation(user_guid=user_guid, organisation_guid=org_guid)
-    db.add(uo)
-    audit('assign_user_organisation', user_guid=user.guid,
-          detail={'target_guid': user_guid, 'org_guid': org_guid, 'org_name': org.name},
-          ip=request.remote_addr)
-    flash(f'Assigned {target.email} to {org.name}.', 'success')
-    return redirect(url_for('frontend.admin_page'))
-
-
 @frontend_bp.route('/admin/assign-employment', methods=['POST'])
 @_require_su_login
 def admin_assign_employment():
@@ -1180,9 +1138,14 @@ def admin_decide_access_request():
         prof = Professional(user_id=new_user.id, professional_role=ar.professional_role,
                             first_name=ar.first_name, last_name=ar.last_name)
         db.add(prof)
-        uo = UserOrganisation(user_guid=new_user.guid, organisation_guid=ar.organisation_guid)
-        db.add(uo)
+        # #863 (decision A): an employment, not an inert legacy membership.
         db.flush()
+        from src.services.employment_service import employ_for_access_request
+        _emp, employment_note = employ_for_access_request(
+            db, new_user.guid, ar.organisation_guid, user.guid)
+        db.flush()
+        flash(f'{ar.email}: {employment_note}. Assign affiliation (unit + role) '
+              f'and activate in S9.', 'info')
 
     audit('access_request_decide', user_guid=user.guid,
           detail={'access_request_guid': ar_guid, 'decision': decision,
@@ -1626,42 +1589,6 @@ def group_admin_invite():
 # Mirrors the /admin/{assign,remove}-org + /admin/{grant,revoke}-phase logic
 # but redirects back to /group-admin so SUs can manage all three access
 # criteria (groups / orgs / phases) without leaving this page.
-
-@frontend_bp.route('/group-admin/assign-org', methods=['POST'])
-@_require_su_login
-def group_admin_assign_org():
-    user = _get_session_user()
-    db = get_db()
-    user_guid = request.form.get('user_guid', '').strip()
-    org_guid = request.form.get('organisation_guid', '').strip()
-
-    from src.models.user import User
-    from src.models.organisation import Organisation
-    from src.models.user_organisation import UserOrganisation
-
-    target = db.query(User).filter_by(guid=user_guid).first()
-    org = db.query(Organisation).filter_by(guid=org_guid).first()
-    if not target or not org:
-        flash('User or organisation not found.', 'error')
-        return redirect(url_for('frontend.group_admin_page'))
-    if target.user_type != 'professional':
-        flash('Only professionals can be assigned to organisations.', 'error')
-        return redirect(url_for('frontend.group_admin_page'))
-
-    existing = db.query(UserOrganisation).filter_by(
-        user_guid=user_guid, organisation_guid=org_guid).first()
-    if existing:
-        flash(f'{target.email} already assigned to {org.name}.', 'warning')
-        return redirect(url_for('frontend.group_admin_page'))
-
-    db.add(UserOrganisation(user_guid=user_guid, organisation_guid=org_guid))
-    audit('assign_user_organisation', user_guid=user.guid,
-          detail={'target_guid': user_guid, 'org_guid': org_guid,
-                  'org_name': org.name, 'from': 'group-admin'},
-          ip=request.remote_addr)
-    flash(f'Assigned {target.email} to {org.name}.', 'success')
-    return redirect(url_for('frontend.group_admin_page'))
-
 
 @frontend_bp.route('/group-admin/remove-org', methods=['POST'])
 @_require_su_login

@@ -68,24 +68,9 @@
                             {% endif %}
                         </span>
                     {% endfor %}
-                    {% if not m.org_labels %}
-                        <span style="color:var(--danger,#c00);font-size:0.75rem;font-weight:600;">No org</span>
-                    {% endif %}
-                    {% if current_user.is_su_admin %}
-                    <form method="post" action="/group-admin/assign-org" style="display:inline-flex;gap:2px;align-items:center;margin-top:2px;">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <input type="hidden" name="user_guid" value="{{ m.user_guid }}">
-                        <select name="organisation_guid" style="font-size:0.7rem;padding:1px 4px;max-width:120px;" required>
-                            <option value="">+ Org</option>
-                            {% for o in all_organisations %}
-                                {% if o.organisation_guid not in m.organization_ids %}
-                                <option value="{{ o.organisation_guid }}">{{ o.name }}</option>
-                                {% endif %}
-                            {% endfor %}
-                        </select>
-                        <button type="submit" class="btn btn-sm btn-secondary" style="padding:1px 6px;font-size:0.7rem;">Add</button>
-                    </form>
-                    {% endif %}
+                    {# #863: the "+ Org" control was removed: it wrote a legacy
+                       membership that grants nothing. Employment and affiliation
+                       are set in the SU panel. #}
                 </td>
                 <td>
                     {% for p in m.direct_phases %}

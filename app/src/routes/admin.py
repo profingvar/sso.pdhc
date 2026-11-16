@@ -686,6 +686,7 @@ def decide_access_request():
     ar.decided_by_guid = caller.guid
 
     user_guid = None
+    employment_note = None
     if decision == 'approved':
         # Create user + professional
         from src.models.user import User
@@ -715,16 +716,20 @@ def decide_access_request():
         )
         session.add(prof)
 
-        # Link to organisation
-        uo = UserOrganisation(user_guid=user.guid, organisation_guid=ar.organisation_guid)
-        session.add(uo)
-
+        # #863 (decision A): employ by the requested organisation's
+        # vårdgivare instead of writing a legacy membership that grants
+        # nothing. Affiliation + activation remain the SU's step in S9.
+        session.flush()
+        from src.services.employment_service import employ_for_access_request
+        _emp, employment_note = employ_for_access_request(
+            session, user.guid, ar.organisation_guid, caller.guid)
         session.flush()
         user_guid = user.guid
 
     audit('access_request_decide', user_guid=caller.guid,
           detail={'access_request_guid': access_request_guid,
                   'decision': decision, 'created_user_guid': user_guid,
+                  'employment': employment_note,   # #863
                   # #57: recorded for audit, but NOT auto-granted; SU
                   # follows up with explicit phase + group grants.
                   'requested_phases_pending_su_grant':
@@ -742,6 +747,7 @@ def decide_access_request():
         # guided assignment (affiliation + phases) and activates. The
         # request's org/role are surfaced as the prefill hint.
         "activation_pending": decision == 'approved',
+        "employment": employment_note,   # #863: what approval employed, or why not
         "hint": ({"care_unit_guid": ar.organisation_guid,
                   "professional_role": ar.professional_role}
                  if decision == 'approved' else None),
@@ -1024,52 +1030,17 @@ def list_user_organisations(user_guid):
 @require_auth
 @require_su
 def assign_user_organisation(user_guid):
-    """POST /api/admin/users/<user_guid>/organisations — assign user to org."""
-    session = get_db()
-    caller = g.current_user
-
-    data = request.get_json() if request.is_json else request.form.to_dict()
-    org_guid = data.get('organisation_guid', '').strip()
-
-    if not org_guid:
-        return jsonify({"error": "invalid_request",
-                        "message": "organisation_guid required"}), 400
-
-    from src.models.user import User
-    from src.models.organisation import Organisation
-    from src.models.user_organisation import UserOrganisation
-
-    user = session.query(User).filter_by(guid=user_guid).first()
-    if user is None:
-        return jsonify({"error": "not_found", "message": "User not found"}), 404
-
-    if user.user_type != 'professional':
-        return jsonify({"error": "invalid_request",
-                        "message": "Only professionals can be assigned to organisations"}), 400
-
-    org = session.query(Organisation).filter_by(guid=org_guid).first()
-    if org is None:
-        return jsonify({"error": "not_found", "message": "Organisation not found"}), 404
-
-    existing = session.query(UserOrganisation).filter_by(
-        user_guid=user_guid, organisation_guid=org_guid
-    ).first()
-    if existing:
-        return jsonify({"error": "conflict",
-                        "message": "User already assigned to this organisation"}), 409
-
-    uo = UserOrganisation(user_guid=user_guid, organisation_guid=org_guid)
-    session.add(uo)
-
-    audit('assign_user_organisation', user_guid=caller.guid,
-          detail={'target_guid': user_guid, 'org_guid': org_guid, 'org_name': org.name},
-          ip=request.remote_addr)
-
+    """GONE (#863). This wrote a legacy membership (user_organisations) that
+    grants nothing: production emits no organization_ids and every consumer
+    reads affiliations. A write that silently changes nothing is worse than a
+    refusal, so it refuses, loudly, and names the replacement. DELETE on the
+    same path stays, so old memberships can still be removed."""
     return jsonify({
-        "user_guid": user_guid,
-        "organisation_guid": org_guid,
-        "name": org.name,
-    }), 201
+        "error": "gone",
+        "message": ("Organisation memberships no longer grant anything. Use "
+                    "POST /api/admin/users/<guid>/employments (vårdgivare) and "
+                    "POST /api/admin/users/<guid>/affiliations (vårdenhet + role)."),
+    }), 410
 
 
 @admin_bp.route('/users/<user_guid>/organisations/<org_guid>', methods=['DELETE'])

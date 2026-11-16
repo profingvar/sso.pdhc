@@ -656,8 +656,12 @@ flowchart TD
 - **Activation (S9):** `GET /users/<guid>/completeness` (server-computed
   checklist), `POST /users/<guid>/activate` (409 + `missing[]` when
   incomplete), `POST /users/<guid>/deactivate` (back to `pending`).
-- **Org membership:** `GET|POST /users/<guid>/organisations`,
-  `DELETE /users/<guid>/organisations/<org_guid>`.
+- **Org membership (legacy, grants nothing):** `GET /users/<guid>/organisations`,
+  `DELETE /users/<guid>/organisations/<org_guid>`. `POST` answers **410 Gone**
+  (#863) and names the replacements: `POST /users/<guid>/employments`
+  (vårdgivare) and `POST /users/<guid>/affiliations` (vårdenhet + role).
+  Approving an access request now **employs** the person by the requested
+  organisation's vårdgivare instead of writing a membership.
 - **Organisations:** `GET|POST /organisations`, `PUT|DELETE
   /organisations/<guid>`, `GET /organisations/<guid>/dependents`,
   `GET /organisations/<guid>/push-config`.

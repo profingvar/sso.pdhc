@@ -54,6 +54,10 @@ def _make_su(app):
                             first_name='Super', last_name='Admin')
         s.add(prof)
         s.flush()
+        # COMMIT, not just flush: an uncommitted row survived only until the
+        # garbage collector closed this session, so tests passed or failed with
+        # GC timing (forcing gc.collect() before the request failed 14).
+        s.commit()
         token = issue_token(user.guid, SECRET, expiry_hours=1)
         return user.guid, token
 
@@ -70,6 +74,10 @@ def _make_professional(app, email='pro@test.com'):
                             first_name='Pro', last_name='User')
         s.add(prof)
         s.flush()
+        # COMMIT, not just flush: an uncommitted row survived only until the
+        # garbage collector closed this session, so tests passed or failed with
+        # GC timing (forcing gc.collect() before the request failed 14).
+        s.commit()
         token = issue_token(user.guid, SECRET, expiry_hours=1)
         return user.guid, token
 
@@ -89,6 +97,10 @@ def _make_patient(app, email='pat@test.com'):
                           organisation_guid=org.guid)
         s.add(patient)
         s.flush()
+        # COMMIT, not just flush: an uncommitted row survived only until the
+        # garbage collector closed this session, so tests passed or failed with
+        # GC timing (forcing gc.collect() before the request failed 14).
+        s.commit()
         token = issue_token(user.guid, SECRET, expiry_hours=1)
         return user.guid, token
 

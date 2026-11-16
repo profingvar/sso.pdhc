@@ -520,3 +520,11 @@ users get an employment at Sim_klinik + an affiliation to Sim_vårdgivare.
 - app/tests/test_audit_log_997.py (NEW); app/tests/test_core.py — reads the dated file
 - .gitignore — shared/
 Survey: sso_app is the only service with a FILE audit log; the rest keep audit in Postgres on a volume.
+
+## 2026-11-16 — #863: the organisation controls that changed nothing are gone
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/employment_service.py — employ_for_access_request(): approval employs by the requested org's vårdgivare
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/admin.py — API approval employs (note in audit + response); POST /users/<g>/organisations -> 410
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — UI approval employs; /admin/assign-org and /group-admin/assign-org removed
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/group_admin.html — inert "+ Org" form and "No org" hint removed
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/architecture.md — membership API documented as legacy, POST 410
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_access_request_employs_863.py (NEW); tests/test_frontend.py — user helpers COMMIT (GC-timing flake)

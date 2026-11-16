@@ -164,3 +164,34 @@ def backfill_employments(session, dry_run=True, by_guid=None):
     else:
         session.commit()
     return out
+
+
+# --- approving an access request (#863, operator decision A, 2026-11-16) ----
+
+def employ_for_access_request(session, person_guid, org_guid, by_guid=None):
+    """Approving "I work at organisation X" employs the person by X's
+    vårdgivare (X itself, or its parent if X is a vårdenhet).
+
+    It used to create a legacy MEMBERSHIP, which grants nothing: production
+    emits no organization_ids (SSO_EMIT_LEGACY_BLOB_FIELDS=false) and every
+    request-phase consumer reads affiliations only. An employment grants no
+    patient access either — it decides WHERE the person may be affiliated —
+    so the SU still assigns the affiliation (unit + role) and activates in S9.
+
+    Returns (employment_or_None, note). Never raises: an approval must not
+    fail because the hint names an external or unknown organisation; the
+    note says why nothing was created.
+    """
+    if not org_guid:
+        return None, "the request named no organisation"
+    caregiver = caregiver_of(session, org_guid)
+    org = session.query(Organisation).filter_by(guid=caregiver).first() if caregiver else None
+    if org is None or org.is_external:
+        return None, "the requested organisation is unknown or external; no employment created"
+    if caregiver in employer_guids(session, person_guid):
+        return None, f"already employed by {org.name}"
+    try:
+        emp, org = add_employment(session, person_guid, caregiver, by_guid)
+    except EmploymentRefused as e:
+        return None, e.message
+    return emp, f"employed by {org.name}"
