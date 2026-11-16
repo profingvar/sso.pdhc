@@ -31,10 +31,10 @@ def register():
     Self-enrolment IS intended production behaviour. Measured 2026-11-02:
     `frontend.register_patient` serves `register_patient.html` at
     `/register-patient` with no decorator at all and a docstring reading
-    "Patient self-registration". So there are TWO anonymous enrolment paths,
-    this one being the better protected of the two because it at least carries
-    a rate limit. #904 asked whether self-enrolment was intended; the UI
-    answers it.
+    "Patient self-registration". #904 asked whether self-enrolment was
+    intended; the UI answers it. Both paths now call
+    `services/patient_enrolment.enrol_patient` (#910), so they cannot drift,
+    and only care units are accepted.
 
     PERSONNUMMER IS DELIBERATELY NOT CHECKSUM-VALIDATED. Do not "harden" this
     by adding a Luhn check. The platform requires synthetic personnummer to
@@ -44,76 +44,27 @@ def register():
     Luhn by design. The 12-digit shape check is the whole of the intended
     validation.
     """
-    session = get_db()
+    from src.services.patient_enrolment import EnrolmentRefused, enrol_patient
+    data = request.get_json(silent=True) if request.is_json else request.form.to_dict()
+    data = data or {}
+    try:
+        user, patient = enrol_patient(
+            get_db(), email=data.get('email'), password=data.get('password'),
+            personnummer=data.get('personnummer'),
+            organisation_guid=data.get('organisation_guid'), ip=request.remote_addr)
+    except EnrolmentRefused as e:
+        if e.code == 'validation_error':
+            return jsonify({"error": e.code, "messages": e.messages}), e.status
+        return jsonify({"error": e.code, "message": e.messages[0]}), e.status
 
-    data = request.get_json() if request.is_json else request.form.to_dict()
-
-    email = data.get('email', '').strip().lower()
-    password = data.get('password', '')
-    personnummer = data.get('personnummer', '').strip()
-    organisation_guid = data.get('organisation_guid', '').strip()
-
-    # Validation
-    errors = []
-    if not email:
-        errors.append('email is required')
-    if not password or len(password) < 8:
-        errors.append('password must be at least 8 characters')
-    if not personnummer or not re.match(r'^\d{12}$', personnummer):
-        errors.append('personnummer must be exactly 12 digits')
-    if not organisation_guid:
-        errors.append('organisation_guid is required')
-
-    if errors:
-        return jsonify({"error": "validation_error", "messages": errors}), 400
-
-    # Check organisation exists
-    from src.models.organisation import Organisation
-    org = session.query(Organisation).filter_by(guid=organisation_guid).first()
-    if org is None:
-        return jsonify({"error": "not_found", "message": "Organisation not found"}), 404
-
-    # Check duplicates
-    from src.models.user import User
     from src.models.patient import Patient
-
-    if session.query(User).filter_by(email=email).first():
-        return jsonify({"error": "conflict", "message": "Email already registered"}), 409
-
-    if session.query(Patient).filter_by(personnummer=personnummer).first():
-        return jsonify({"error": "conflict", "message": "Personnummer already registered"}), 409
-
-    # Create user + patient
-    user = User(
-        email=email,
-        password_hash=hash_password(password),
-        user_type='patient',
-        is_su_admin=False,
-    )
-    session.add(user)
-    session.flush()  # get user.id
-
-    patient = Patient(
-        user_id=user.id,
-        personnummer=personnummer,
-        organisation_guid=organisation_guid,
-        in_registry=False,
-        registries=[],
-    )
-    session.add(patient)
-    session.flush()  # get patient.guid
-
-    audit('patient_register', user_guid=user.guid,
-          detail={'email': email, 'personnummer': personnummer[:4] + '****'},
-          ip=request.remote_addr)
-
     return jsonify({
         "resourceType": Patient.FHIR_RESOURCE_TYPE,
         "user_guid": user.guid,
         "patient_guid": patient.guid,
-        "email": email,
-        "personnummer": personnummer,
-        "organisation_guid": organisation_guid,
+        "email": user.email,
+        "personnummer": patient.personnummer,
+        "organisation_guid": patient.organisation_guid,
         "in_registry": False,
         "registries": [],
     }), 201

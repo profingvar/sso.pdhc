@@ -530,3 +530,11 @@ Survey: sso_app is the only service with a FILE audit log; the rest keep audit i
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_access_request_employs_863.py (NEW); tests/test_frontend.py — user helpers COMMIT (GC-timing flake)
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — 2026-11-16: UI approval creates the person PENDING (operator: both pending); audit carries created_user_guid + employment
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_access_request_employs_863.py — pending asserted on both paths
+
+## 2026-11-16 — #910: one patient enrolment for both routes, offering only care units
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/patient_enrolment.py (NEW) — enrol_patient + enrollable_choices; the one implementation
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/care_hierarchy.py — enrollable_care_units(): units + vårdgivare without units
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/patient.py — JSON register calls the service (response shape unchanged)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — /register-patient calls the service; list = care units only
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/api-reference.md — which organisations are accepted
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_patient_enrolment_910.py (NEW)

@@ -114,3 +114,19 @@ def scan_violations(session):
                 'guid': org.guid, 'name': org.name, 'problem': str(e),
             })
     return problems
+
+
+# --- where a patient can belong (#910, operator decision 2026-11-16) --------
+
+def enrollable_care_units(session):
+    """The organisations a patient may self-enrol with: every care unit, plus
+    each internal vårdgivare that has NO units (it is its own unit — the same
+    rule as affiliation and Rule 24 scoping). External partners and a
+    vårdgivare that HAS units are not offered: a patient belongs to a unit.
+    Sorted by name, which is the order the form shows them in."""
+    internal = session.query(Organisation).filter(
+        Organisation.is_external.is_(False)).all()
+    with_units = {o.parent_caregiver_guid for o in internal if o.parent_caregiver_guid}
+    return sorted((o for o in internal
+                   if o.parent_caregiver_guid or o.guid not in with_units),
+                  key=lambda o: o.name.lower())

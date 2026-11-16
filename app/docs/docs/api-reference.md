@@ -239,7 +239,14 @@ On success the server also clears `force_change_on_next_login` on the user, so t
 **Rate Limit:** 10 req/min per IP
 **FHIR:** Patient resource shape in response
 
-Self-registration for patients.
+Self-registration for patients. The same rules as the `/register-patient`
+form, which calls the same service (#910).
+
+`organisation_guid` must be a **care unit** (vårdenhet), or a vårdgivare that
+has no units (it is its own unit). An external partner, a vårdgivare that has
+units, and an unknown guid all answer the same `404 Organisation not found`.
+The personnummer is checked for 12 digits only — deliberately no checksum
+(synthetic numbers carry an invalid one, #405).
 
 **Request:**
 ```json

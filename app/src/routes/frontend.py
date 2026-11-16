@@ -1725,62 +1725,30 @@ def register_patient():
     page and its template are the evidence — so gating it would break the
     feature rather than close a hole.
 
-    Two things measured here that are NOT fixed and are tracked separately:
-    this GET hands every organisation's guid and name to an anonymous caller
-    because the form needs a list to pick from, and the duplicate-enrolment
-    paths can drift. Personnummer is deliberately not checksum-validated; see
-    the note in `routes/patient.py::register` before adding one.
+    #910 fixed the two things #904 left open: both routes now call ONE
+    service (`services/patient_enrolment.py`), and the list offers only care
+    units (operator 2026-11-16) instead of every organisation's guid.
+    Personnummer is deliberately not checksum-validated; see that service.
     """
+    from src.services.patient_enrolment import (EnrolmentRefused, enrol_patient,
+                                                enrollable_choices)
     db = get_db()
-    from src.models.organisation import Organisation
-    orgs = db.query(Organisation).all()
-    organisations = [{'organisation_guid': o.guid, 'name': o.name} for o in orgs]
+    # #910: only where a patient can belong (care units), not every
+    # organisation on the platform. The same rule refuses anything else on POST.
+    organisations = [{'organisation_guid': g, 'name': n}
+                     for g, n in enrollable_choices(db)]
 
     if request.method == 'POST':
-        email = request.form.get('email', '').strip().lower()
-        password = request.form.get('password', '')
-        personnummer = request.form.get('personnummer', '').strip()
-        org_guid = request.form.get('organisation_guid', '').strip()
-
-        errors = []
-        if not email:
-            errors.append('Email is required.')
-        if not password or len(password) < 8:
-            errors.append('Password must be at least 8 characters.')
-        if not re.match(r'^\d{12}$', personnummer):
-            errors.append('Personnummer must be exactly 12 digits.')
-        if not org_guid:
-            errors.append('Organisation is required.')
-
-        if errors:
-            for e in errors:
-                flash(e, 'error')
+        try:
+            enrol_patient(db, email=request.form.get('email'),
+                          password=request.form.get('password'),
+                          personnummer=request.form.get('personnummer'),
+                          organisation_guid=request.form.get('organisation_guid'),
+                          ip=request.remote_addr)
+        except EnrolmentRefused as e:
+            for m in e.messages:
+                flash(m[0].upper() + m[1:] + ('' if m.endswith('.') else '.'), 'error')
             return render_template('register_patient.html', organisations=organisations)
-
-        org = db.query(Organisation).filter_by(guid=org_guid).first()
-        if org is None:
-            flash('Organisation not found.', 'error')
-            return render_template('register_patient.html', organisations=organisations)
-
-        from src.models.user import User
-        if db.query(User).filter_by(email=email).first():
-            flash('Email already registered.', 'error')
-            return render_template('register_patient.html', organisations=organisations)
-
-        from src.models.patient import Patient
-        if db.query(Patient).filter_by(personnummer=personnummer).first():
-            flash('Personnummer already registered.', 'error')
-            return render_template('register_patient.html', organisations=organisations)
-
-        new_user = User(email=email, password_hash=hash_password(password),
-                        user_type='patient', is_su_admin=False)
-        db.add(new_user)
-        db.flush()
-        patient = Patient(user_id=new_user.id, personnummer=personnummer,
-                          organisation_guid=org_guid)
-        db.add(patient)
-        db.flush()
-
         flash('Registration successful! You can now log in.', 'success')
         return redirect(url_for('frontend.login_page'))
 
