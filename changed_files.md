@@ -528,3 +528,5 @@ Survey: sso_app is the only service with a FILE audit log; the rest keep audit i
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/group_admin.html — inert "+ Org" form and "No org" hint removed
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/architecture.md — membership API documented as legacy, POST 410
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_access_request_employs_863.py (NEW); tests/test_frontend.py — user helpers COMMIT (GC-timing flake)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — 2026-11-16: UI approval creates the person PENDING (operator: both pending); audit carries created_user_guid + employment
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_access_request_employs_863.py — pending asserted on both paths

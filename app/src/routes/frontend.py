@@ -1122,6 +1122,8 @@ def admin_decide_access_request():
     ar.status = decision
     ar.decided_by_guid = user.guid
 
+    employment_note = None
+    created_guid = None
     if decision == 'approved':
         # #57: groups and phases are independent criteria. Approval
         # creates the user + professional + organisation link. The SU
@@ -1131,8 +1133,12 @@ def admin_decide_access_request():
         from src.models.professional import Professional
         from src.models.user_organisation import UserOrganisation
 
+        # S9 (#411): PENDING with zero access, exactly as the API approval.
+        # This path created the person ACTIVE until 2026-11-16 (operator:
+        # both pending); activation is the SU's completeness-checked step.
         new_user = User(email=ar.email, password_hash=ar.password_hash,
-                        user_type='professional', is_su_admin=False)
+                        user_type='professional', is_su_admin=False,
+                        status='pending')
         db.add(new_user)
         db.flush()
         prof = Professional(user_id=new_user.id, professional_role=ar.professional_role,
@@ -1144,11 +1150,14 @@ def admin_decide_access_request():
         _emp, employment_note = employ_for_access_request(
             db, new_user.guid, ar.organisation_guid, user.guid)
         db.flush()
+        created_guid = new_user.guid
         flash(f'{ar.email}: {employment_note}. Assign affiliation (unit + role) '
               f'and activate in S9.', 'info')
 
     audit('access_request_decide', user_guid=user.guid,
           detail={'access_request_guid': ar_guid, 'decision': decision,
+                  'created_user_guid': created_guid,
+                  'employment': employment_note,   # #863
                   # #57: surfaced for audit; SU must grant these explicitly.
                   'requested_phases_pending_su_grant':
                       list(ar.requested_phases or [])},

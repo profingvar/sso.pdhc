@@ -64,13 +64,8 @@ def test_approval_EMPLOYS_by_the_vardgivare_and_writes_no_membership(client, app
     ar, email = _request(app, world, world['a'])
     r = _api_approve(client, world, ar) if via == 'api' else _ui_approve(client, app, world, ar)
     assert r.status_code in (200, 302)
-    emp, mem, status = _state(app, email)
-    assert (emp, mem) == ({world['a']}, set()), "employed, and no inert membership"
-    if via == 'api':
-        # S9: pending until the SU affiliates and activates. (The UI approval
-        # has always created the person ACTIVE; a pre-existing divergence,
-        # not #863's, and reported separately.)
-        assert status == 'pending'
+    assert _state(app, email) == ({world['a']}, set(), 'pending'), \
+        "employed, no inert membership, PENDING on both paths (operator 2026-11-16)"
 
 
 @pytest.mark.parametrize('via', ['api', 'ui'])
