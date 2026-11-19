@@ -1008,3 +1008,4 @@ want fixing together.
 - New: `PATCH /api/admin/users/<g>/affiliations/<a>` changes role (+ research projects) in place, same rules as create (shared helper), (person, unit, role) unique → 409, audited `affiliation_update` with from/to. UI: role select + "Byt roll" per affiliation row.
 - New: `/admin/set-professional-role` (doctor/nurse/other label on the person), select in the Users table, audited.
 - Tests: test_s9_session_ui.py 7 — all through a session; 5 fail with the old middleware (mutation-checked). Suite 473 passed.
+- DEPLOYED 2026-11-19 as overlay image FROM the running image (rollback tag `sso-app:pre_s9sess`, files `*.pre_s9sess.<ts>` in /usr/local/www/sso.pdhc/app). Baseline 4/4, health 200, hashes ok; no-auth GET and PATCH 401, forged CSRF header without a session 401, junk Bearer 401, /login 200; siblings 200.
