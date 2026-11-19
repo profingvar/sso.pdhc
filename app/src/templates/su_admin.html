@@ -169,7 +169,17 @@
                     <div class="person-meta">
                         <span class="badge badge-{{ u.user_type }}">{{ u.user_type }}</span>
                         {% if u.user_type == 'professional' %}
-                            <span title="Professional role">{{ u.professional_role or '— no role —' }}</span>
+                            <form method="post" action="/admin/set-professional-role" style="display:inline-flex;gap:2px;align-items:center;margin:0;"
+                                  title="Professional role (a label; patient access comes from affiliations)">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
+                                <select name="professional_role" style="font-size:0.7rem;padding:0 2px;" onchange="this.form.submit()">
+                                    {% if not u.professional_role %}<option value="" selected disabled>— no role —</option>{% endif %}
+                                    {% for pr in ('doctor', 'nurse', 'other') %}
+                                    <option value="{{ pr }}" {% if u.professional_role == pr %}selected{% endif %}>{{ pr }}</option>
+                                    {% endfor %}
+                                </select>
+                            </form>
                         {% else %}
                             <span title="Personnummer">{{ u.personnummer or '— no personnummer —' }}</span>
                         {% endif %}
@@ -924,8 +934,9 @@
 
     function authHeaders() {
         const token = window.SSO_TOKEN || (typeof getCookie === 'function' && getCookie('sso_token'));
+        // The page is signed in by SESSION; the CSRF token lets /api accept it.
         return token ? {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
-                     : {'Content-Type': 'application/json'};
+                     : {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}'};
     }
 
     let CATALOGUE = {scopes: [], services: []};
@@ -1318,8 +1329,9 @@
 
     function hdrs() {
         const token = window.SSO_TOKEN || (typeof getCookie === 'function' && getCookie('sso_token'));
+        // The page is signed in by SESSION; the CSRF token lets /api accept it.
         return token ? {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
-                     : {'Content-Type': 'application/json'};
+                     : {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}'};
     }
     const el = id => document.getElementById(id);
     const guid = () => el('s9-user').value;
@@ -1364,7 +1376,11 @@
                     `<div style="color:#d97706;font-size:0.78rem;">✘ ${MISSING_TEXT[m] || m}</div>`).join(''));
         el('s9-affs').innerHTML = (data.affiliations || []).map(a => `<tr>
             <td style="font-size:0.78rem;">${a.care_unit_name || a.care_unit_guid}</td>
-            <td style="font-size:0.78rem;">${a.role}</td>
+            <td style="font-size:0.78rem;">
+                <select id="s9-role-${a.affiliation_guid}" style="font-size:0.72rem;">${ROLES.map(r =>
+                    `<option value="${r.guid}" data-code="${r.code}" ${r.guid === a.role_guid ? 'selected' : ''}>${r.display_name || r.code}</option>`).join('')}</select>
+                <button class="btn btn-sm btn-secondary" title="Byt roll på denna affiliering"
+                    onclick="s9ChangeRole('${a.affiliation_guid}', ${JSON.stringify(a.research_project_guids || []).replace(/"/g, '&quot;')})">Byt roll</button></td>
             <td style="font-size:0.78rem;">${(a.research_project_guids || []).length || '-'}</td>
             <td><button class="btn btn-sm btn-secondary"
                 onclick="s9DeleteAffiliation('${a.affiliation_guid}')">remove</button></td></tr>`).join('')
@@ -1423,6 +1439,27 @@
         if (r.ok) s9Load();
     };
 
+    window.s9ChangeRole = async function(affGuid, currentProjects) {
+        const sel = el('s9-role-' + affGuid);
+        const code = sel.selectedOptions[0]?.dataset.code;
+        const body = {role_guid: sel.value};
+        if (code === 'researcher') {
+            // keep the projects it has; otherwise take those picked in the form below
+            const picked = [...el('s9-projects').selectedOptions].map(o => o.value);
+            body.research_project_guids = currentProjects.length ? currentProjects : picked;
+            if (!body.research_project_guids.length) {
+                el('s9-role').value = sel.value; el('s9-role').onchange();
+                msg('Forskare kräver projekt: markera projekt i listan nedan och klicka Byt roll igen.', true);
+                return;
+            }
+        }
+        const r = await fetch(`/api/admin/users/${guid()}/affiliations/${affGuid}`,
+                              {method: 'PATCH', headers: hdrs(), body: JSON.stringify(body)});
+        const d = await r.json();
+        msg(r.ok ? 'Roll ändrad.' : (d.message || 'failed'), !r.ok);
+        if (r.ok) s9Load();
+    };
+
     window.s9DeleteAffiliation = async function(affGuid) {
         const r = await fetch(`/api/admin/users/${guid()}/affiliations/${affGuid}`,
                               {method: 'DELETE', headers: hdrs()});
@@ -1453,8 +1490,9 @@
 (function() {
     function rhdrs() {
         const token = window.SSO_TOKEN || (typeof getCookie === 'function' && getCookie('sso_token'));
+        // The page is signed in by SESSION; the CSRF token lets /api accept it.
         return token ? {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
-                     : {'Content-Type': 'application/json'};
+                     : {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}'};
     }
     const rerr = m => { const e = document.getElementById('reg-error'); if (!e) return;
                         e.textContent = m || ''; e.style.display = m ? 'block' : 'none'; };

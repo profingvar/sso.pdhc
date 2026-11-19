@@ -829,6 +829,34 @@ def admin_grant_phase():
     return redirect(url_for('frontend.admin_page'))
 
 
+@frontend_bp.route('/admin/set-professional-role', methods=['POST'])
+@_require_su_login
+def admin_set_professional_role():
+    """2026-11-19: SU sets a professional's own role label (doctor / nurse /
+    other). It is a label; patient access comes from affiliations."""
+    user = _get_session_user()
+    db = get_db()
+    target_guid = request.form.get('user_guid', '').strip()
+    new_role = request.form.get('professional_role', '').strip()
+    from src.models.user import User
+    from src.models.professional import Professional
+    if new_role not in ('doctor', 'nurse', 'other'):
+        flash('Professional role must be doctor, nurse or other.', 'error')
+        return redirect(url_for('frontend.admin_page'))
+    target = db.query(User).filter_by(guid=target_guid).first()
+    prof = db.query(Professional).filter_by(user_id=target.id).first() if target else None
+    if prof is None:
+        flash('Professional not found.', 'error')
+        return redirect(url_for('frontend.admin_page'))
+    old = prof.professional_role
+    prof.professional_role = new_role
+    audit('set_professional_role', user_guid=user.guid,
+          detail={'target_guid': target_guid, 'from': old, 'to': new_role},
+          ip=request.remote_addr)
+    flash(f'{target.email}: role {old or "—"} → {new_role}.', 'success')
+    return redirect(url_for('frontend.admin_page'))
+
+
 @frontend_bp.route('/admin/revoke-phase', methods=['POST'])
 @_require_su_login
 def admin_revoke_phase():

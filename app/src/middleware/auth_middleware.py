@@ -10,6 +10,29 @@ from src.services.jwt_service import (
 )
 
 
+def _session_token_with_csrf():
+    """The SU admin PAGE is signed in by session cookie, not Bearer (2026-11-19).
+
+    Its fetches to /api/* (S9 panel, role registry) found no Bearer and got
+    401, so in a browser no affiliation could be assigned. A session is
+    accepted here ONLY together with a valid X-CSRFToken header: a cross-site
+    page can make the browser send the cookie, never the token. API clients
+    keep using Bearer and are unaffected."""
+    from flask import session as flask_session
+    token = flask_session.get('token')
+    header = request.headers.get('X-CSRFToken', '')
+    if not token or not header:
+        return None
+    from flask_wtf.csrf import validate_csrf
+    from wtforms.validators import ValidationError
+    try:
+        validate_csrf(header)
+    except ValidationError:
+        return None
+    g.auth_via = 'session'
+    return token
+
+
 def _get_current_user():
     """Extract and validate Bearer token, load user into g.current_user.
 
@@ -18,10 +41,12 @@ def _get_current_user():
     but each new request (or different token) always re-validates.
     """
     auth_header = request.headers.get('Authorization', '')
-    if not auth_header.startswith('Bearer '):
-        return None
-
-    token = auth_header[7:]
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    else:
+        token = _session_token_with_csrf()
+        if token is None:
+            return None
 
     # Per-request cache: skip re-validation if same token already validated
     if hasattr(g, '_auth_token') and g._auth_token == token and hasattr(g, 'current_user'):

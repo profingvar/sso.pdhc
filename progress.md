@@ -1001,3 +1001,10 @@ want fixing together.
 - Tests: test_read_grants.py 21. Suite 466 passed.
 - DB: `read_grants` created by scripts/init_db.py (create_all, additive); `purpose_code`, `research_project_guids` added by ALTER (after pg_dump `~/backups/predeploy/sso.pdhc/pre_extread_20261119T141013Z.pgdump`).
 - Deployed as overlay image (rollback `sso-app:pre_extread`). Live: InterSystems holds grant 55457741… (statistics; cdr1-3 + ips; Hackathon, Hackathon_klin1, Hackathon_klin2; expires 2026-11-21 14:14Z). The first grant (no purpose) is revoked.
+
+## 2026-11-19 — S9 panel under the SU session + change role in place
+- Defect: the SU admin page is signed in by session cookie, but its S9 panel (employments, affiliations, activation) and the role registry fetched Bearer-only /api routes, and nothing put a Bearer in the page (`window.SSO_TOKEN` / cookie `sso_token` are set nowhere). In a browser, Load answered 401: no affiliation could be assigned from the UI. Same shape as the read-grants picker earlier today; every API test is Bearer, so all stayed green.
+- Fix: `_get_current_user` accepts the session token when, and only when, the request carries a valid `X-CSRFToken` (a cross-site page can make the browser send the cookie, never the token). Bearer clients unchanged. The page's three header helpers send the token.
+- New: `PATCH /api/admin/users/<g>/affiliations/<a>` changes role (+ research projects) in place, same rules as create (shared helper), (person, unit, role) unique → 409, audited `affiliation_update` with from/to. UI: role select + "Byt roll" per affiliation row.
+- New: `/admin/set-professional-role` (doctor/nurse/other label on the person), select in the Users table, audited.
+- Tests: test_s9_session_ui.py 7 — all through a session; 5 fail with the old middleware (mutation-checked). Suite 473 passed.

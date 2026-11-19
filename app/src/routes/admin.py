@@ -1300,6 +1300,28 @@ def list_user_affiliations(user_guid):
     }), 200
 
 
+def _role_projects_refusal(session, role, project_guids):
+    """researcher needs >=1 registered project; other roles none. Shared by
+    create and change-role so the two cannot drift. None = OK."""
+    from src.models.research_project import ResearchProject
+    if role.code == 'researcher':
+        if not project_guids:
+            return jsonify({"error": "invalid_request",
+                            "message": "researcher affiliation requires >=1 "
+                                       "research_project_guid (ResDB #400)"}), 400
+        known = {p.guid for p in session.query(ResearchProject).filter(
+            ResearchProject.guid.in_(project_guids)).all()}
+        unknown = [p for p in project_guids if p not in known]
+        if unknown:
+            return jsonify({"error": "invalid_request",
+                            "message": f"unknown research projects: {unknown}"}), 400
+    elif project_guids:
+        return jsonify({"error": "invalid_request",
+                        "message": "research_project_guids only valid for "
+                                   "role=researcher"}), 400
+    return None
+
+
 @admin_bp.route('/users/<user_guid>/affiliations', methods=['POST'])
 @require_auth
 @require_su
@@ -1362,21 +1384,9 @@ def create_user_affiliation(user_guid):
         return jsonify({"error": "affiliation_outside_employment",
                         "message": outside}), 409
 
-    if role.code == 'researcher':
-        if not project_guids:
-            return jsonify({"error": "invalid_request",
-                            "message": "researcher affiliation requires >=1 "
-                                       "research_project_guid (ResDB #400)"}), 400
-        known = {p.guid for p in session.query(ResearchProject).filter(
-            ResearchProject.guid.in_(project_guids)).all()}
-        unknown = [p for p in project_guids if p not in known]
-        if unknown:
-            return jsonify({"error": "invalid_request",
-                            "message": f"unknown research projects: {unknown}"}), 400
-    elif project_guids:
-        return jsonify({"error": "invalid_request",
-                        "message": "research_project_guids only valid for "
-                                   "role=researcher"}), 400
+    bad = _role_projects_refusal(session, role, project_guids)
+    if bad:
+        return bad
 
     dup = session.query(Affiliation).filter_by(
         person_guid=user_guid, care_unit_guid=care_unit_guid,
@@ -1406,6 +1416,62 @@ def create_user_affiliation(user_guid):
         "affiliation_guid": aff.guid,
         "completeness": completeness(session, user),
     }), 201
+
+
+@admin_bp.route('/users/<user_guid>/affiliations/<affiliation_guid>',
+                methods=['PATCH'])
+@require_auth
+@require_su
+def update_user_affiliation(user_guid, affiliation_guid):
+    """PATCH — change the ROLE (and research projects) of one affiliation in
+    place (2026-11-19). Body {role_guid, research_project_guids?}. Same rules
+    as create: role in the registry, researcher <=> projects, and (person,
+    unit, role) stays unique. The care unit is not changed here: a different
+    unit is a different affiliation (and is checked against employment)."""
+    session = get_db()
+    caller = g.current_user
+    from src.models.affiliation import Affiliation
+    from src.models.role import Role
+    from src.models.user import User
+
+    aff = session.query(Affiliation).filter_by(
+        guid=affiliation_guid, person_guid=user_guid).first()
+    if aff is None:
+        return jsonify({"error": "not_found", "message": "Affiliation not found"}), 404
+    data = request.get_json(silent=True) or {}
+    role_guid = (data.get('role_guid') or '').strip()
+    project_guids = list(data.get('research_project_guids') or [])
+    role = session.query(Role).filter_by(guid=role_guid).first() if role_guid else None
+    if role is None:
+        return jsonify({"error": "invalid_request",
+                        "message": "role_guid not in the role registry"}), 400
+    bad = _role_projects_refusal(session, role, project_guids)
+    if bad:
+        return bad
+    dup = session.query(Affiliation).filter(
+        Affiliation.person_guid == user_guid,
+        Affiliation.care_unit_guid == aff.care_unit_guid,
+        Affiliation.role_guid == role_guid,
+        Affiliation.guid != aff.guid).first()
+    if dup is not None:
+        return jsonify({"error": "conflict",
+                        "message": "the person already has that role at this unit",
+                        "affiliation_guid": dup.guid}), 409
+    old_role = session.query(Role).filter_by(guid=aff.role_guid).first()
+    old = {'role': old_role.code if old_role else None,
+           'research_project_guids': aff.research_project_guids or []}
+    aff.role_guid = role_guid
+    aff.research_project_guids = project_guids or None
+    session.flush()
+    audit('affiliation_update', user_guid=caller.guid,
+          detail={'person_guid': user_guid, 'affiliation_guid': aff.guid,
+                  'from': old, 'to': {'role': role.code,
+                                      'research_project_guids': project_guids}},
+          ip=request.remote_addr)
+    from src.services.activation_service import completeness
+    user = session.query(User).filter_by(guid=user_guid).first()
+    return jsonify({"affiliation_guid": aff.guid, "role": role.code,
+                    "completeness": completeness(session, user)}), 200
 
 
 @admin_bp.route('/users/<user_guid>/affiliations/<affiliation_guid>',

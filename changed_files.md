@@ -547,3 +547,10 @@ Survey: sso_app is the only service with a FILE audit log; the rest keep audit i
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — research projects rendered for the purpose picker
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/su_admin.html — External Partners → Read access panel
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_read_grants.py (NEW), /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_models.py (read_grants table)
+
+## 2026-11-19 — S9 panel works under the SU session; change role in place
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/middleware/auth_middleware.py — session accepted ONLY with a valid X-CSRFToken header
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/admin.py — PATCH /api/admin/users/<g>/affiliations/<a> (role + projects); shared _role_projects_refusal
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — POST /admin/set-professional-role
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/su_admin.html — fetch headers carry the CSRF token; "Byt roll" per affiliation; role select per professional
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_s9_session_ui.py (NEW)
