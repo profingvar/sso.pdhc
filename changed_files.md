@@ -538,3 +538,12 @@ Survey: sso_app is the only service with a FILE audit log; the rest keep audit i
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — /register-patient calls the service; list = care units only
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/api-reference.md — which organisations are accepted
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_patient_enrolment_910.py (NEW)
+
+## 2026-11-19 — external read grants
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/models/read_grant.py (NEW) — ReadGrant; MAX_HOURS 48; targets cdr1/2/3 + ips; PURPOSES
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/models/__init__.py — registers ReadGrant
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/read_grants.py (NEW) — issue/list/revoke (SU), POST /api/internal/read-grants/validate (service pair)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/app.py — registers + CSRF-exempts read_grants_bp
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — research projects rendered for the purpose picker
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/su_admin.html — External Partners → Read access panel
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_read_grants.py (NEW), /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_models.py (read_grants table)

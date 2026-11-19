@@ -991,3 +991,13 @@ behaviour: a registration form that cannot say "already registered" cannot be
 used. The anonymous GET publishing every organisation's guid, and the duplicate
 enrolment implementations, are #910 — both about the same two routes, so they
 want fixing together.
+
+## 2026-11-19 — external read grants (2ade96d, 1b8b33f, 039f169)
+- SU issues a key `rg.<guid>.<secret>` (sha256 at rest, shown once) to an EXTERNAL partner: patient organisations, targets (cdr1/cdr2/cdr3/ips), legal purpose (statistics / quality_assurance / quality_registry / research + named projects), at most 48 h. The 48 h ceiling is also checked against created_at at validation, so a hand-stretched row is still refused. Revoke takes effect on the next read (targets validate on every request).
+- `POST /api/internal/read-grants/validate` (X-SSO-Client-Id/Secret against SERVICE_CREDENTIALS): 200 scope, 401 bad key (unknown grant and wrong secret answer alike), 403 with reason revoked / expired / partner_inactive / cdr_not_granted.
+- Two defects found after the first deploy, both invisible to Bearer-only API tests:
+  1. the panel fetched organisations from Bearer-only /api/admin/organisations while the page is session-signed → empty picker, no key could be issued. Fixed by rendering the list into the page; tests now go through a session.
+  2. no purpose on the grant, so the CDRs asked ips for "research" with no project → ips allows nobody. Fixed: purpose chosen per key (operator decision).
+- Tests: test_read_grants.py 21. Suite 466 passed.
+- DB: `read_grants` created by scripts/init_db.py (create_all, additive); `purpose_code`, `research_project_guids` added by ALTER (after pg_dump `~/backups/predeploy/sso.pdhc/pre_extread_20261119T141013Z.pgdump`).
+- Deployed as overlay image (rollback `sso-app:pre_extread`). Live: InterSystems holds grant 55457741… (statistics; cdr1-3 + ips; Hackathon, Hackathon_klin1, Hackathon_klin2; expires 2026-11-21 14:14Z). The first grant (no purpose) is revoked.
