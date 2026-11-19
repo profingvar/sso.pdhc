@@ -40,6 +40,7 @@ class TestAllTablesCreated:
         'research_projects',  # reform S4 #400: research-project registry
         'affiliations',  # reform S3 #399: person<->care_unit<->role
         'employments',  # main rule 2026-11-13: person employed by vårdgivare
+        'read_grants',  # 2026-11-19: time-limited external CDR read grants
     ]
 
     def test_all_tables_exist(self, db_session):

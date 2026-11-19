@@ -19,8 +19,11 @@ from src.models.research_project import ResearchProject
 from src.models.affiliation import Affiliation
 # Main rule 2026-11-13: a person is employed by one or more vårdgivare.
 from src.models.employment import Employment
+# 2026-11-19: time-limited external read grants on CDR data.
+from src.models.read_grant import ReadGrant
 
 __all__ = [
+    'ReadGrant',
     'User', 'Patient', 'Professional', 'Organisation', 'OrganisationAudit',
     'UserOrganisation', 'Group', 'Membership', 'GroupProposal',
     'LeaderRequest', 'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',

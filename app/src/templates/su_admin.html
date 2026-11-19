@@ -969,6 +969,7 @@
                     <td>${statusBadge(p.status)}</td>
                     <td style="white-space:nowrap;">${p.expires_at ? p.expires_at.slice(0,10) : '—'}</td>
                     <td style="text-align:right;white-space:nowrap;">
+                        ${p.status === 'active' ? `<button onclick="window._rgOpen('${p.partner_guid}')" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;border:1px solid #2563eb;background:#fff;color:#2563eb;cursor:pointer;" title="Time-limited read key for CDR data">Read access</button>` : ''}
                         <button onclick="window._partnersRotate('${p.partner_guid}')" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;border:1px solid var(--border,#d1d5db);background:#fff;cursor:pointer;">Rotate</button>
                         ${p.status === 'active' ? `<button onclick="window._partnersSuspend('${p.partner_guid}')" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;border:1px solid #d97706;background:#fff;color:#d97706;cursor:pointer;">Suspend</button>` :
                           p.status === 'suspended' ? `<button onclick="window._partnersReactivate('${p.partner_guid}')" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;border:1px solid #16a34a;background:#fff;color:#16a34a;cursor:pointer;">Reactivate</button>` : ''}
@@ -992,6 +993,122 @@
     };
 
     window._partnersRefresh = refresh;
+
+    // ---- External read grants (2026-11-19) --------------------------------
+    // A key for at most 48 h, bound to chosen patient organisations and CDRs.
+    // Issued here; each CDR validates it on every request.
+    const RG_CDRS = ['cdr1', 'cdr2', 'cdr3'];
+    const rgEsc = t => String(t ?? '').replace(/[&<>"']/g,
+        c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[c]);
+    let RG_PARTNER = null, RG_ORGS = null;
+
+    function rgPanel() {
+        let el = document.getElementById('rg-panel');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'rg-panel';
+            el.style.cssText = 'margin-top:1rem;padding:0.75rem;border:1px solid #93c5fd;border-radius:6px;background:#eff6ff;';
+            document.getElementById('partners-table').parentElement.after(el);
+        }
+        return el;
+    }
+
+    async function rgOrgs(partnerGuids) {
+        if (RG_ORGS) return RG_ORGS;
+        const r = await fetch('/api/admin/organisations', {headers: authHeaders()});
+        const all = r.ok ? await r.json() : [];
+        RG_ORGS = all.filter(o => !partnerGuids.has(o.organisation_guid))
+                     .sort((a, b) => a.name.localeCompare(b.name));
+        return RG_ORGS;
+    }
+
+    window._rgOpen = async function(partnerGuid) {
+        RG_PARTNER = partnerGuid;
+        const el = rgPanel();
+        el.innerHTML = 'Loading…';
+        const pr = await fetch('/api/admin/partners', {headers: authHeaders()});
+        const partners = pr.ok ? (await pr.json()).partners || [] : [];
+        const me = partners.find(p => p.partner_guid === partnerGuid) || {};
+        const orgs = await rgOrgs(new Set(partners.map(p => p.partner_guid)));
+        el.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+            <h4 style="margin:0;font-size:0.9rem;">Read access for ${rgEsc(me.display_name || partnerGuid)}</h4>
+            <button onclick="document.getElementById('rg-panel').remove()" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;border:1px solid var(--border,#d1d5db);background:#fff;cursor:pointer;">Close</button>
+          </div>
+          <p style="font-size:0.8rem;color:#374151;margin:0.4rem 0 0.6rem;">
+            The partner reads de-identified data: the real patient GUID, sex, birth year,
+            diagnoses, medications and every datapoint with its exact time. No personnummer,
+            name or address. This is pseudonymised data, still personal data under GDPR.
+          </p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:0.75rem;">
+            <div><label style="font-size:0.8rem;font-weight:600;">Patient organisations</label>
+              <div id="rg-orgs" style="max-height:10rem;overflow:auto;border:1px solid var(--border,#d1d5db);border-radius:4px;padding:0.3rem;background:#fff;font-size:0.8rem;">
+                ${orgs.map(o => `<label style="display:block;"><input type="checkbox" value="${rgEsc(o.organisation_guid)}"> ${rgEsc(o.name)}</label>`).join('') || '<em>No organisations</em>'}
+              </div></div>
+            <div><label style="font-size:0.8rem;font-weight:600;">CDRs</label>
+              <div id="rg-cdrs" style="font-size:0.8rem;">
+                ${RG_CDRS.map(c => `<label style="display:block;"><input type="checkbox" value="${c}"> ${c}</label>`).join('')}
+              </div>
+              <label for="rg-hours" style="font-size:0.8rem;font-weight:600;display:block;margin-top:0.5rem;">Valid for (hours, max 48)</label>
+              <input id="rg-hours" type="number" min="1" max="48" value="48" style="width:6rem;">
+            </div>
+            <div><label for="rg-purpose" style="font-size:0.8rem;font-weight:600;">Purpose (recorded)</label>
+              <textarea id="rg-purpose" rows="3" maxlength="500" style="width:100%;font-size:0.8rem;"></textarea></div>
+          </div>
+          <div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+            <button onclick="window._rgIssue()" style="padding:5px 14px;border-radius:4px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Issue read key</button>
+            <span id="rg-error" style="color:#dc2626;font-size:0.8rem;"></span>
+          </div>
+          <div id="rg-key" style="display:none;margin-top:0.5rem;padding:0.5rem;background:#fef9c3;border:1px solid #facc15;border-radius:4px;font-size:0.8rem;"></div>
+          <h5 style="margin:0.9rem 0 0.3rem;font-size:0.85rem;">Issued keys</h5>
+          <div id="rg-list" style="font-size:0.8rem;">Loading…</div>`;
+        rgList();
+    };
+
+    async function rgList() {
+        const host = document.getElementById('rg-list');
+        if (!host) return;
+        const r = await fetch(`/api/admin/partners/${RG_PARTNER}/read-grants`, {headers: authHeaders()});
+        const items = r.ok ? (await r.json()).items : [];
+        const name = g => (RG_ORGS || []).find(o => o.organisation_guid === g)?.name || g.slice(0, 8) + '…';
+        host.innerHTML = items.length ? `<div style="overflow-x:auto;"><table style="font-size:0.78rem;width:100%;">
+            <tr><th>Status</th><th>CDRs</th><th>Organisations</th><th>Expires</th><th>Last used</th><th></th></tr>
+            ${items.map(i => `<tr>
+              <td>${rgEsc(i.status)}</td><td>${rgEsc(i.cdrs.join(', '))}</td>
+              <td>${i.org_guids.map(g => rgEsc(name(g))).join(', ')}</td>
+              <td style="white-space:nowrap;">${rgEsc((i.expires_at || '').slice(0, 16).replace('T', ' '))}</td>
+              <td style="white-space:nowrap;">${rgEsc((i.last_used_at || '—').slice(0, 16).replace('T', ' '))}</td>
+              <td>${i.status === 'active' ? `<button onclick="window._rgRevoke('${i.guid}')" style="font-size:0.72rem;padding:1px 6px;border-radius:4px;border:1px solid #dc2626;background:#fff;color:#dc2626;cursor:pointer;">Revoke</button>` : ''}</td>
+            </tr>`).join('')}</table></div>` : '<em>None yet.</em>';
+    }
+
+    window._rgIssue = async function() {
+        const err = document.getElementById('rg-error');
+        err.textContent = '';
+        const body = {
+            org_guids: Array.from(document.querySelectorAll('#rg-orgs input:checked')).map(b => b.value),
+            cdrs: Array.from(document.querySelectorAll('#rg-cdrs input:checked')).map(b => b.value),
+            hours: parseInt(document.getElementById('rg-hours').value, 10),
+            purpose: document.getElementById('rg-purpose').value,
+        };
+        const r = await fetch(`/api/admin/partners/${RG_PARTNER}/read-grants`,
+                              {method: 'POST', headers: authHeaders(), body: JSON.stringify(body)});
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { err.textContent = d.message || ('HTTP ' + r.status); return; }
+        const box = document.getElementById('rg-key');
+        box.style.display = 'block';
+        box.innerHTML = `<strong>Copy the key now. It is not shown again.</strong><br>
+          <code id="rg-key-val" style="word-break:break-all;user-select:all;">${rgEsc(d.key)}</code><br>
+          Valid until ${rgEsc(d.expires_at.slice(0, 16).replace('T', ' '))} UTC, for ${rgEsc(d.cdrs.join(', '))}.
+          Read at <code>https://&lt;cdr&gt;.pdhc.se/external/v1/patients</code> with header
+          <code>Authorization: Bearer &lt;key&gt;</code>.`;
+        rgList();
+    };
+
+    window._rgRevoke = async function(grantGuid) {
+        await fetch(`/api/admin/read-grants/${grantGuid}/revoke`, {method: 'POST', headers: authHeaders()});
+        rgList();
+    };
 
     window._partnersSubmit = async function() {
         const err = document.getElementById('pn-error');
