@@ -1013,12 +1013,16 @@
         return el;
     }
 
+    // The page's own organisation list, rendered server-side. NOT fetched from
+    // /api/admin/organisations: that route takes a Bearer token only, and this
+    // page is signed in by session cookie, so the fetch came back 401 and the
+    // picker was empty -- no key could be issued (found 2026-11-19).
+    const RG_ALL_ORGS = {{ organisations | tojson }};
+
     async function rgOrgs(partnerGuids) {
         if (RG_ORGS) return RG_ORGS;
-        const r = await fetch('/api/admin/organisations', {headers: authHeaders()});
-        const all = r.ok ? await r.json() : [];
-        RG_ORGS = all.filter(o => !partnerGuids.has(o.organisation_guid))
-                     .sort((a, b) => a.name.localeCompare(b.name));
+        RG_ORGS = RG_ALL_ORGS.filter(o => !o.is_external && !partnerGuids.has(o.organisation_guid))
+                             .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         return RG_ORGS;
     }
 

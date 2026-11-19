@@ -112,3 +112,30 @@ def test_suspended_partner_stops_its_grants(client, seeded_app, partner):
                 headers={**_su(seeded_app), 'X-Service-Key': 'test-internal-key'}, json={})
     r = _validate(client, key)
     assert r.status_code == 403 and r.get_json()['reason'] == 'partner_inactive'
+
+
+# ---- The SU admin PAGE is signed in by session cookie, not Bearer (2026-11-19).
+# The first UI fetched its organisation list from /api/admin/organisations, a
+# Bearer-only route, so in the browser the picker came back empty and no key
+# could be issued -- while every API test above (all Bearer) stayed green.
+
+def _session(client, seeded_app):
+    with client.session_transaction() as s:
+        s['token'] = seeded_app['su_token']
+
+
+def test_admin_page_carries_the_organisations_for_the_picker(client, seeded_app):
+    _session(client, seeded_app)
+    html = client.get('/admin').get_data(as_text=True)
+    assert 'const RG_ALL_ORGS = ' in html
+    i = html.index('const RG_ALL_ORGS = ')
+    assert seeded_app['org_guid'] in html[i:i + 20000]
+    assert "fetch('/api/admin/organisations'" not in html
+
+
+def test_a_session_signed_su_can_issue_without_a_bearer(client, seeded_app, partner):
+    _session(client, seeded_app)
+    r = client.post(f'/api/admin/partners/{partner}/read-grants',
+                    json={'org_guids': [seeded_app['org_guid']], 'cdrs': ['cdr2'], 'hours': 1})
+    assert r.status_code == 201, r.get_data(as_text=True)
+    assert r.get_json()['key'].startswith('rg.')
