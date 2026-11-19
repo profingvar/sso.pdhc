@@ -604,7 +604,14 @@ def admin_page():
     # poller that hit /api/service-health on load and every 30 minutes. The CSV
     # read is removed here for the same reason.
 
+    # 2026-11-19: research projects for the read-grant purpose picker. Rendered
+    # into the page (it is session-signed; the registry API wants a Bearer).
+    from src.models.research_project import ResearchProject
+    rg_research_projects = [{'guid': p.guid, 'name': p.name}
+                            for p in db.query(ResearchProject).order_by(ResearchProject.name)]
+
     return render_template('su_admin.html',
+                           rg_research_projects=rg_research_projects,
                            users=users, organisations=organisations,
                            access_requests=access_requests,
                            group_proposals=group_proposals,

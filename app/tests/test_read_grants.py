@@ -22,7 +22,8 @@ def partner(client, seeded_app):
 
 
 def _issue(client, seeded_app, partner, **kw):
-    body = {'org_guids': [seeded_app['org_guid']], 'cdrs': ['cdr2'], 'hours': 48, **kw}
+    body = {'org_guids': [seeded_app['org_guid']], 'cdrs': ['cdr2'], 'hours': 48,
+            'purpose_code': 'statistics', **kw}
     return client.post(f'/api/admin/partners/{partner}/read-grants', json=body,
                        headers=_su(seeded_app))
 
@@ -63,6 +64,9 @@ def test_issue_returns_key_once_and_validate_returns_the_scope(client, seeded_ap
     ({'hours': 49}, 'hours'), ({'hours': 0}, 'hours'), ({'hours': True}, 'hours'),
     ({'cdrs': []}, 'cdrs'), ({'cdrs': ['cdr_6']}, 'cdrs'),
     ({'org_guids': []}, 'org_guids'), ({'org_guids': ['nope']}, 'org_guids'),
+    ({'purpose_code': None}, 'purpose_code'), ({'purpose_code': 'care'}, 'purpose_code'),
+    ({'purpose_code': 'research'}, 'research_project_guids'),
+    ({'purpose_code': 'research', 'research_project_guids': ['nope']}, 'research_project_guids'),
 ])
 def test_issue_refuses_bad_input(client, seeded_app, partner, kw, frag):
     r = _issue(client, seeded_app, partner, **kw)
@@ -136,6 +140,41 @@ def test_admin_page_carries_the_organisations_for_the_picker(client, seeded_app)
 def test_a_session_signed_su_can_issue_without_a_bearer(client, seeded_app, partner):
     _session(client, seeded_app)
     r = client.post(f'/api/admin/partners/{partner}/read-grants',
-                    json={'org_guids': [seeded_app['org_guid']], 'cdrs': ['cdr2'], 'hours': 1})
+                    json={'org_guids': [seeded_app['org_guid']], 'cdrs': ['cdr2'], 'hours': 1,
+                          'purpose_code': 'statistics'})
     assert r.status_code == 201, r.get_data(as_text=True)
     assert r.get_json()['key'].startswith('rg.')
+
+
+def _project(app):
+    from src.db import get_session
+    from src.models.research_project import ResearchProject
+    with app.app_context():
+        s = get_session(); p = ResearchProject(name='Diabetesstudien'); s.add(p); s.commit()
+        g = p.guid; s.close()
+    return g
+
+
+def test_purpose_and_projects_travel_to_the_reader(client, seeded_app, partner, app):
+    proj = _project(app)
+    r = _issue(client, seeded_app, partner, cdrs=['ips', 'cdr2'], purpose_code='research',
+               research_project_guids=[proj])
+    assert r.status_code == 201, r.get_data(as_text=True)
+    key = r.get_json()['key']
+    v = _validate(client, key, cdr='ips').get_json()
+    assert v['purpose_code'] == 'research' and v['research_project_guids'] == [proj]
+    assert v['cdrs'] == ['cdr2', 'ips']
+
+
+def test_non_research_purpose_drops_projects(client, seeded_app, partner, app):
+    proj = _project(app)
+    d = _issue(client, seeded_app, partner, research_project_guids=[proj]).get_json()
+    assert d['purpose_code'] == 'statistics' and d['research_project_guids'] == []
+
+
+def test_admin_page_offers_ips_and_the_purposes(client, seeded_app, app):
+    proj = _project(app)
+    _session(client, seeded_app)
+    html = client.get('/admin').get_data(as_text=True)
+    assert "const RG_CDRS = ['cdr1', 'cdr2', 'cdr3', 'ips'];" in html
+    assert 'rg-purpose-code' in html and proj in html

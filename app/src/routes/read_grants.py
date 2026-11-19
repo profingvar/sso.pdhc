@@ -14,7 +14,8 @@ from flask import Blueprint, current_app, g, jsonify, request
 
 from src.db import get_db
 from src.models.organisation import Organisation
-from src.models.read_grant import KEY_PREFIX, KNOWN_CDRS, MAX_HOURS, ReadGrant
+from src.models.read_grant import KEY_PREFIX, KNOWN_CDRS, MAX_HOURS, PURPOSES, ReadGrant
+from src.models.research_project import ResearchProject
 from src.routes.partners import _require_su
 from src.services.audit_log import audit
 
@@ -74,18 +75,36 @@ def issue(partner_guid):
         return _bad(f'hours: a whole number from 1 to {MAX_HOURS}')
     if purpose and len(purpose) > 500:
         return _bad('purpose: at most 500 characters')
+    code = body.get('purpose_code')
+    if code not in PURPOSES:
+        return _bad(f'purpose_code: one of {", ".join(PURPOSES)}')
+    projects = body.get('research_project_guids') or []
+    if not isinstance(projects, list) or not all(isinstance(x, str) for x in projects):
+        return _bad('research_project_guids: a list of guids')
+    projects = sorted(set(projects))
+    if code == 'research':
+        if not projects:
+            return _bad('research_project_guids: research needs at least one project')
+        found = {p.guid for p in db.query(ResearchProject).filter(ResearchProject.guid.in_(projects))}
+        missing = [x for x in projects if x not in found]
+        if missing:
+            return _bad('research_project_guids: unknown research projects', unknown=missing)
+    else:
+        projects = []
 
     secret = secrets.token_urlsafe(32)
     now = _now()
     grant = ReadGrant(partner_guid=partner.guid, org_guids=orgs, cdrs=cdrs,
                       secret_hash=_hash(secret), purpose=purpose,
+                      purpose_code=code, research_project_guids=projects,
                       created_by_user_guid=g.current_user.guid,
                       created_at=now, expires_at=now + timedelta(hours=hours))
     db.add(grant)
     db.commit()
     audit('read_grant.issued', user_guid=g.current_user.guid,
           detail={'grant_guid': grant.guid, 'partner_guid': partner.guid,
-                  'org_guids': orgs, 'cdrs': cdrs, 'hours': hours},
+                  'org_guids': orgs, 'cdrs': cdrs, 'hours': hours,
+                  'purpose_code': code, 'research_project_guids': projects},
           ip=request.remote_addr)
     return jsonify({**grant.to_dict(), 'partner_name': partner.name,
                     'key': f'{KEY_PREFIX}.{grant.guid}.{secret}',
@@ -171,4 +190,6 @@ def validate():
                     'partner_name': partner.name if partner else None,
                     'org_guids': list(grant.org_guids or []),
                     'cdrs': list(grant.cdrs or []),
+                    'purpose_code': grant.purpose_code,
+                    'research_project_guids': list(grant.research_project_guids or []),
                     'expires_at': _aware(grant.expires_at).isoformat()})

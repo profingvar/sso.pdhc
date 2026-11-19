@@ -997,7 +997,14 @@
     // ---- External read grants (2026-11-19) --------------------------------
     // A key for at most 48 h, bound to chosen patient organisations and CDRs.
     // Issued here; each CDR validates it on every request.
-    const RG_CDRS = ['cdr1', 'cdr2', 'cdr3'];
+    const RG_CDRS = ['cdr1', 'cdr2', 'cdr3', 'ips'];
+    const RG_PROJECTS = {{ rg_research_projects | tojson }};
+    const RG_PURPOSES = [
+        ['statistics', 'Statistics — all except EHDS opt-outs'],
+        ['quality_assurance', 'Quality assurance — all except EHDS opt-outs'],
+        ['quality_registry', 'Quality registry — also excludes registry opt-outs'],
+        ['research', 'Research — only patients who consented to a chosen project'],
+    ];
     const rgEsc = t => String(t ?? '').replace(/[&<>"']/g,
         c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[c]);
     let RG_PARTNER = null, RG_ORGS = null;
@@ -1041,23 +1048,35 @@
           </div>
           <p style="font-size:0.8rem;color:#374151;margin:0.4rem 0 0.6rem;">
             The partner reads de-identified data: the real patient GUID, sex, birth year,
-            diagnoses, medications and every datapoint with its exact time. No personnummer,
-            name or address. This is pseudonymised data, still personal data under GDPR.
+            diagnoses, medications and, from a CDR, every datapoint with its exact time. No
+            personnummer, name or address. This is pseudonymised data, still personal data under
+            GDPR. Target <strong>ips</strong> reads the IPS summary of every patient assigned to
+            the chosen organisations, whether or not they have CDR data.
           </p>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:0.75rem;">
             <div><label style="font-size:0.8rem;font-weight:600;">Patient organisations</label>
               <div id="rg-orgs" style="max-height:10rem;overflow:auto;border:1px solid var(--border,#d1d5db);border-radius:4px;padding:0.3rem;background:#fff;font-size:0.8rem;">
                 ${orgs.map(o => `<label style="display:block;"><input type="checkbox" value="${rgEsc(o.organisation_guid)}"> ${rgEsc(o.name)}</label>`).join('') || '<em>No organisations</em>'}
               </div></div>
-            <div><label style="font-size:0.8rem;font-weight:600;">CDRs</label>
+            <div><label style="font-size:0.8rem;font-weight:600;">Targets</label>
               <div id="rg-cdrs" style="font-size:0.8rem;">
                 ${RG_CDRS.map(c => `<label style="display:block;"><input type="checkbox" value="${c}"> ${c}</label>`).join('')}
               </div>
               <label for="rg-hours" style="font-size:0.8rem;font-weight:600;display:block;margin-top:0.5rem;">Valid for (hours, max 48)</label>
               <input id="rg-hours" type="number" min="1" max="48" value="48" style="width:6rem;">
             </div>
-            <div><label for="rg-purpose" style="font-size:0.8rem;font-weight:600;">Purpose (recorded)</label>
-              <textarea id="rg-purpose" rows="3" maxlength="500" style="width:100%;font-size:0.8rem;"></textarea></div>
+            <div><label for="rg-purpose-code" style="font-size:0.8rem;font-weight:600;">Legal purpose (decides which patients ips's consent lets through)</label>
+              <select id="rg-purpose-code" style="width:100%;font-size:0.8rem;" onchange="document.getElementById('rg-projects-box').hidden = this.value !== 'research'">
+                <option value="">— choose —</option>
+                ${RG_PURPOSES.map(([v, t]) => `<option value="${v}">${rgEsc(t)}</option>`).join('')}
+              </select>
+              <div id="rg-projects-box" hidden style="margin-top:0.4rem;">
+                <label style="font-size:0.8rem;font-weight:600;">Research projects</label>
+                <div id="rg-projects" style="max-height:7rem;overflow:auto;border:1px solid var(--border,#d1d5db);border-radius:4px;padding:0.3rem;background:#fff;font-size:0.8rem;">
+                  ${RG_PROJECTS.map(p => `<label style="display:block;"><input type="checkbox" value="${rgEsc(p.guid)}"> ${rgEsc(p.name)}</label>`).join('') || '<em>No research projects in the registry</em>'}
+                </div></div>
+              <label for="rg-purpose" style="font-size:0.8rem;font-weight:600;display:block;margin-top:0.4rem;">Description (recorded)</label>
+              <textarea id="rg-purpose" rows="2" maxlength="500" style="width:100%;font-size:0.8rem;"></textarea></div>
           </div>
           <div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
             <button onclick="window._rgIssue()" style="padding:5px 14px;border-radius:4px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Issue read key</button>
@@ -1076,9 +1095,9 @@
         const items = r.ok ? (await r.json()).items : [];
         const name = g => (RG_ORGS || []).find(o => o.organisation_guid === g)?.name || g.slice(0, 8) + '…';
         host.innerHTML = items.length ? `<div style="overflow-x:auto;"><table style="font-size:0.78rem;width:100%;">
-            <tr><th>Status</th><th>CDRs</th><th>Organisations</th><th>Expires</th><th>Last used</th><th></th></tr>
+            <tr><th>Status</th><th>Targets</th><th>Purpose</th><th>Organisations</th><th>Expires</th><th>Last used</th><th></th></tr>
             ${items.map(i => `<tr>
-              <td>${rgEsc(i.status)}</td><td>${rgEsc(i.cdrs.join(', '))}</td>
+              <td>${rgEsc(i.status)}</td><td>${rgEsc(i.cdrs.join(', '))}</td><td>${rgEsc(i.purpose_code || '—')}</td>
               <td>${i.org_guids.map(g => rgEsc(name(g))).join(', ')}</td>
               <td style="white-space:nowrap;">${rgEsc((i.expires_at || '').slice(0, 16).replace('T', ' '))}</td>
               <td style="white-space:nowrap;">${rgEsc((i.last_used_at || '—').slice(0, 16).replace('T', ' '))}</td>
@@ -1094,6 +1113,8 @@
             cdrs: Array.from(document.querySelectorAll('#rg-cdrs input:checked')).map(b => b.value),
             hours: parseInt(document.getElementById('rg-hours').value, 10),
             purpose: document.getElementById('rg-purpose').value,
+            purpose_code: document.getElementById('rg-purpose-code').value,
+            research_project_guids: Array.from(document.querySelectorAll('#rg-projects input:checked')).map(b => b.value),
         };
         const r = await fetch(`/api/admin/partners/${RG_PARTNER}/read-grants`,
                               {method: 'POST', headers: authHeaders(), body: JSON.stringify(body)});
@@ -1104,7 +1125,7 @@
         box.innerHTML = `<strong>Copy the key now. It is not shown again.</strong><br>
           <code id="rg-key-val" style="word-break:break-all;user-select:all;">${rgEsc(d.key)}</code><br>
           Valid until ${rgEsc(d.expires_at.slice(0, 16).replace('T', ' '))} UTC, for ${rgEsc(d.cdrs.join(', '))}.
-          Read at <code>https://&lt;cdr&gt;.pdhc.se/external/v1/patients</code> with header
+          Purpose: ${rgEsc(d.purpose_code)}. Read at <code>https://&lt;cdr1|cdr2|cdr3|ips&gt;.pdhc.se/external/v1/patients</code> with header
           <code>Authorization: Bearer &lt;key&gt;</code>.`;
         rgList();
     };
