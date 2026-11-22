@@ -57,6 +57,10 @@ class Config:
     # Comma list of care-unit guids the registration form offers. Empty = every
     # enrollable care unit. Narrows only: a guid that is not a care unit is
     # not offered.
+    # #1050 (operator 2026-11-22): a patient joins ONLY by invitation from their
+    # care unit. Open self-registration is CLOSED unless this is set true.
+    # Blank or missing means closed.
+    PATIENT_SELF_REGISTRATION = os.environ.get('PATIENT_SELF_REGISTRATION', 'false')
     PATIENT_REGISTRATION_UNITS = os.environ.get('PATIENT_REGISTRATION_UNITS', '')
     # Default TRUE: refuse a personnummer whose check digit is VALID (it may be
     # a real person's). Only synthetic numbers (wrong check digit) in the pilot.
@@ -121,6 +125,7 @@ class TestConfig(Config):
     EPS_BASE_URL = ''
     EPS_API_KEY = ''
     EPS_LINK_CHECK_DISABLED = ''
+    PATIENT_SELF_REGISTRATION = 'true'
     PATIENT_REGISTRATION_UNITS = ''
     PATIENT_REGISTRATION_SYNTHETIC_ONLY = 'true'
     PATIENT_REGISTRATION_MIN_SECONDS = 0.0

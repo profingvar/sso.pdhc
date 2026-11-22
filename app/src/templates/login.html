@@ -24,7 +24,7 @@
         </form>
         <p class="text-muted text-center mt-2" style="font-size:0.85rem;">
             New professional? <a href="/request-access">Request access</a><br>
-            Patient? <a href="/register-patient">Register here</a>
+            {% if config.get('PATIENT_SELF_REGISTRATION', '')|string|lower in ('1','true','yes') %}Patient? <a href="/register-patient">Register here</a>{% endif %}
         </p>
     </div>
 </div>

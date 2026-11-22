@@ -624,3 +624,18 @@ Survey: sso_app is the only service with a FILE audit log; the rest keep audit i
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/user-guide.md, api-reference.md, architecture.md, admin-manual.md, deployment-guide.md
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/sso.pdhc/changed_files.md
 - /Users/martiningvar/T7_sidewinder/plans/patient_app_contract.md — seven `[v2 sso]` Deviations lines (outside this repo)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/config.py  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/app.py  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/patient_enrolment.py  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/patient.py  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/base.html  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/landing.html  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/login.html  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/register_patient_closed.html  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_registration_closed_1050.py  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_self_registration_904.py  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/conftest.py  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_frontend.py  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_patient.py  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/.env.example  (#1050)

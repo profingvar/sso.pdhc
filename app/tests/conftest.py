@@ -21,6 +21,8 @@ def app():
     """Create test application with in-memory SQLite."""
     reset_rate_limits()
     application = create_app({
+        # #1050: production default is CLOSED; these suites test the open door.
+        'PATIENT_SELF_REGISTRATION': 'true',
         'TESTING': True,
         'SECRET_KEY': SECRET,
         'WTF_CSRF_ENABLED': False,

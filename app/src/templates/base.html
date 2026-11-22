@@ -256,7 +256,7 @@
             {% else %}
                 <a href="/">Home</a>
                 <a href="/login">Login</a>
-                <a href="/register-patient">Register</a>
+                {% if config.get('PATIENT_SELF_REGISTRATION', '')|string|lower in ('1','true','yes') %}<a href="/register-patient">Register</a>{% endif %}
                 <a href="/request-access">Request Access</a>
             {% endif %}
         </div>

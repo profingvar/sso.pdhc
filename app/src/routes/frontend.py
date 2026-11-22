@@ -1829,9 +1829,18 @@ def register_patient():
     accepts it (the #1048 rule); anything else is dropped silently.
     """
     from src.routes.second_factor_ui import callback_allowed
-    from src.services.patient_enrolment import (REGISTERED_TEXT, EnrolmentRefused,
+    from src.services.patient_enrolment import (CLOSED_TEXT, REGISTERED_TEXT, EnrolmentRefused,
                                                 register_patient as register,
-                                                registration_choices)
+                                                registration_choices,
+                                                self_registration_open)
+    if not self_registration_open(current_app.config):
+        # #1050: closed. Nothing is read from the form and nothing is created.
+        if request.method == 'POST':
+            audit('patient_register_closed', ip=request.remote_addr)
+        resp = current_app.make_response(
+            (render_template('register_patient_closed.html', message=CLOSED_TEXT), 200))
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
     db = get_db()
     organisations = [{'organisation_guid': g, 'name': n}
                      for g, n in registration_choices(db, current_app.config)]

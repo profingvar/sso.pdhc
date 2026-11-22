@@ -60,6 +60,8 @@ def app():
     from src.middleware.rate_limit import reset_rate_limits
     reset_rate_limits()
     return create_app({
+        # #1050: production default is CLOSED; these suites test the open door.
+        'PATIENT_SELF_REGISTRATION': 'true',
         'TESTING': True, 'SECRET_KEY': SECRET,
         'WTF_CSRF_ENABLED': False, 'SESSION_EXPIRY_HOURS': 1,
         'ALLOWED_ORIGINS': [], 'ALLOWED_CALLBACK_URLS': [],
@@ -199,7 +201,16 @@ class TestTheDocstringNoLongerPromisesAGateThatDoesNotExist:
         body = ast.parse(inspect.getsource(register).lstrip())
         names = {ast.unparse(n) for n in ast.walk(body)
                  if isinstance(n, ast.Attribute)}
-        assert not any('current_app.config' in n for n in names), names
+        # #1050: the route's ONLY use of config is to hand it to the service
+        # that decides whether the door is open; it reads no flag itself.
+        calls = [n for n in ast.walk(body) if isinstance(n, ast.Call)
+                 and any(isinstance(a, ast.Attribute) and ast.unparse(a) == 'current_app.config'
+                         for a in n.args)]
+        assert [ast.unparse(c.func) for c in calls] == ['self_registration_open'], calls
+        subs = [n for n in ast.walk(body) if isinstance(n, (ast.Subscript, ast.Attribute))
+                and ast.unparse(n).startswith('current_app.config')
+                and ast.unparse(n) != 'current_app.config']
+        assert subs == [], [ast.unparse(n) for n in subs]
 
     def test_no_such_flag_exists_anywhere_which_is_why_the_claim_was_wrong(
             self):
@@ -212,7 +223,10 @@ class TestTheDocstringNoLongerPromisesAGateThatDoesNotExist:
         # registration on or off — they narrow the unit list, refuse a valid
         # personnummer, and set a timing floor — and all three are read in
         # services/patient_enrolment.py. Any other such name is still a hit.
-        allowed = {'PATIENT_REGISTRATION_UNITS',
+        # #1050 (operator 2026-11-22) added the one that DOES switch it:
+        # PATIENT_SELF_REGISTRATION, default closed (patients join by
+        # invitation). It is read in the same service as the other three.
+        allowed = {'PATIENT_SELF_REGISTRATION', 'PATIENT_REGISTRATION_UNITS',
                    'PATIENT_REGISTRATION_SYNTHETIC_ONLY',
                    'PATIENT_REGISTRATION_MIN_SECONDS'}
         hits = []

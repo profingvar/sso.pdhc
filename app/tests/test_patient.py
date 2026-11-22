@@ -21,6 +21,8 @@ def app():
     from src.middleware.rate_limit import reset_rate_limits
     reset_rate_limits()
     app = create_app({
+        # #1050: production default is CLOSED; these suites test the open door.
+        'PATIENT_SELF_REGISTRATION': 'true',
         'TESTING': True,
         'SECRET_KEY': SECRET,
         'WTF_CSRF_ENABLED': False,

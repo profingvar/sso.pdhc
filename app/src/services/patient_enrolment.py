@@ -82,6 +82,16 @@ def _truthy(value, default):
     return str(value).strip().lower() in ('1', 'true', 'yes')
 
 
+CLOSED_TEXT = ('Du behöver en inbjudan från din vårdenhet för att gå med. '
+               'Vårdenheten ger dig en länk.')
+
+
+def self_registration_open(config):
+    """#1050: default FALSE. A patient joins by invitation from their care
+    unit; open self-registration exists only when the operator turns it on."""
+    return _truthy(config.get('PATIENT_SELF_REGISTRATION'), False)
+
+
 def synthetic_only(config):
     """Default TRUE: only the operator turns it off, and only when the
     platform is cleared to hold real patients."""

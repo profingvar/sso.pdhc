@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Inbjudan behövs — sso.pdhc{% endblock %}
+{% block content %}
+{# #1050: patients join by invitation from their care unit only. #}
+<div style="max-width: 500px; margin: 2rem auto;" lang="sv">
+    <div class="card">
+        <h2>Du behöver en inbjudan</h2>
+        <p>{{ message }}</p>
+        <p class="text-muted">Har du redan ett konto? Logga in.</p>
+        <a class="btn btn-primary" style="width:100%; display:block; text-align:center;" href="/login">Logga in</a>
+    </div>
+</div>
+{% endblock %}

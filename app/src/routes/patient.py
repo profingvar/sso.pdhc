@@ -34,8 +34,13 @@ def register():
     is never a reason to refuse a SYNTHETIC number (#405); under the pilot's
     synthetic-only rule it is a VALID one that is refused, in the service.
     """
-    from src.services.patient_enrolment import (REGISTERED_TEXT, EnrolmentRefused,
-                                                register_patient)
+    from flask import current_app
+    from src.services.patient_enrolment import (CLOSED_TEXT, REGISTERED_TEXT, EnrolmentRefused,
+                                                register_patient, self_registration_open)
+    if not self_registration_open(current_app.config):
+        # #1050: patients join by invitation only.
+        audit('patient_register_closed', ip=request.remote_addr)
+        return jsonify({'error': 'registration_closed', 'message': CLOSED_TEXT}), 403
     data = request.get_json(silent=True) if request.is_json else request.form.to_dict()
     data = data or {}
     try:

@@ -1123,3 +1123,7 @@ Built against `~/T7_sidewinder/plans/patient_app_contract.md` s7.1 (s1, s6 still
 - Full suite before: 559 passed. After: **617 passed** (559 + 58 new; the updated tests keep their count), 0 failed. Record: `results/2026-11-22T12-38-07Z_results/pytest_full_1049.txt`.
 
 **Operator, at deploy (not done)**: give SSO's eps key the scope `patients:self-register`; set `PATIENT_REGISTRATION_UNITS`; run `scripts/init_db.py` (creates `patient_profiles`). eps must have shipped s7.2 first. Deviations: `[v2 sso]` lines in the contract.
+
+## 2026-11-22 — #1050 open registration closed
+- `PATIENT_SELF_REGISTRATION` (default false): `/register-patient` shows "Du behöver en inbjudan", `POST /api/patient/register` answers 403 `registration_closed`; nothing is created and eps is not called. Register links hidden while closed.
+- Tests: `tests/test_registration_closed_1050.py` (8; mutation control: 5 fail with the guard removed). Suite 629 passed.
