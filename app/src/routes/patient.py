@@ -15,59 +15,44 @@ patient_bp = Blueprint('patient', __name__, url_prefix='/api/patient')
 @patient_bp.route('/register', methods=['POST'])
 @rate_limit(max_requests=10, window_seconds=60)
 def register():
-    """POST /api/patient/register — self-enrolment.
+    """POST /api/patient/register — self-registration (#1049, contract s7.1).
 
-    Creates user (type=patient) + patient row.
-    Requires: email, password, personnummer (12 digits), organisation_guid.
-    Returns FHIR Patient-shaped response.
+    Body: given_name, family_name, personnummer (10 or 12 digits, real date),
+    email (the login), mobile (optional, Swedish), organisation_guid (a care
+    unit from the registration list), password.
 
-    UNAUTHENTICATED BY DESIGN, and that is now stated rather than implied
-    (#904). This docstring used to promise "Dev-mode only flag checked via
-    config", and no such flag existed anywhere in `app/src` — `config` was
-    assigned on the next line and never read. That is the #804 shape: a
-    docstring advertising a capability that is not there, which is worse than
-    silence because it stops the next reader looking.
+    202 {"status": "received", "message": <REGISTERED_TEXT>} for EVERY
+    non-error outcome (already registered / created and linked / created
+    unlinked), so the answer says nothing about who has an account. Form
+    errors: 400 validation_error {messages}, 404 not_found (unit),
+    422 unit_not_available, 503 eps_not_configured | eps_unavailable |
+    not_committed. All rules are in services/patient_enrolment.py; this route
+    reads no config itself.
 
-    Self-enrolment IS intended production behaviour. Measured 2026-11-02:
-    `frontend.register_patient` serves `register_patient.html` at
-    `/register-patient` with no decorator at all and a docstring reading
-    "Patient self-registration". #904 asked whether self-enrolment was
-    intended; the UI answers it. Both paths now call
-    `services/patient_enrolment.enrol_patient` (#910), so they cannot drift,
-    and only care units are accepted.
-
-    PERSONNUMMER IS DELIBERATELY NOT CHECKSUM-VALIDATED. Do not "harden" this
-    by adding a Luhn check. The platform requires synthetic personnummer to
-    carry an INVALID checksum (#405 confinement), so a checksum check would
-    reject every synthetic patient the platform creates on purpose — including
-    this module's own tests, whose `199001011234` and `200101011234` both fail
-    Luhn by design. The 12-digit shape check is the whole of the intended
-    validation.
+    UNAUTHENTICATED BY DESIGN (#904): self-enrolment is intended production
+    behaviour, rate-limited like the HTML door. The personnummer check digit
+    is never a reason to refuse a SYNTHETIC number (#405); under the pilot's
+    synthetic-only rule it is a VALID one that is refused, in the service.
     """
-    from src.services.patient_enrolment import EnrolmentRefused, enrol_patient
+    from src.services.patient_enrolment import (REGISTERED_TEXT, EnrolmentRefused,
+                                                register_patient)
     data = request.get_json(silent=True) if request.is_json else request.form.to_dict()
     data = data or {}
     try:
-        user, patient = enrol_patient(
-            get_db(), email=data.get('email'), password=data.get('password'),
-            personnummer=data.get('personnummer'),
-            organisation_guid=data.get('organisation_guid'), ip=request.remote_addr)
+        register_patient(
+            get_db(), given_name=data.get('given_name'),
+            family_name=data.get('family_name'),
+            personnummer=data.get('personnummer'), email=data.get('email'),
+            mobile=data.get('mobile'),
+            organisation_guid=data.get('organisation_guid'),
+            password=data.get('password'), ip=request.remote_addr)
     except EnrolmentRefused as e:
         if e.code == 'validation_error':
             return jsonify({"error": e.code, "messages": e.messages}), e.status
         return jsonify({"error": e.code, "message": e.messages[0]}), e.status
-
-    from src.models.patient import Patient
-    return jsonify({
-        "resourceType": Patient.FHIR_RESOURCE_TYPE,
-        "user_guid": user.guid,
-        "patient_guid": patient.guid,
-        "email": user.email,
-        "personnummer": patient.personnummer,
-        "organisation_guid": patient.organisation_guid,
-        "in_registry": False,
-        "registries": [],
-    }), 201
+    # #1049: ONE answer for "already registered", "registered and linked" and
+    # "registered, not linked" — no guid, no echo of what was sent.
+    return jsonify({"status": "received", "message": REGISTERED_TEXT}), 202
 
 
 @patient_bp.route('/registry-status', methods=['GET'])

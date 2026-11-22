@@ -350,6 +350,33 @@ There is no SU panel for these yet; use the API with your Bearer token. Every
 link, relink and unlink is kept in the `patient_link_history` table as well as
 in the audit log.
 
+### Patient self-registration (#1049)
+
+A patient can now register on their own (`/register-patient`, reached from the
+patient app's **Registrera dig**). SSO asks eps to create the patient at the
+chosen unit; when eps does, the account is linked at once
+(`linked_by = self-registration`, the chosen unit). When eps already knew the
+personnummer, the account is created **unlinked** and care links it with the
+patient's link code as before — SSO never links to an existing eps patient on
+the registrant's word.
+
+| audit event | meaning |
+|---|---|
+| `patient_self_linked` | new account, eps created the patient, linked |
+| `patient_register_unlinked` | new account, eps already had the patient; waits for a link code |
+| `patient_register_duplicate` | email or personnummer already had an account; nothing created (`which` says which) |
+| `patient_register_refused` | eps not configured / unreachable / unit unknown to eps; nothing created |
+| `patient_register_not_committed` | eps created a patient but SSO could not save the account; rolled back. The eps patient (guid in the event) has no account; a new attempt gets an unlinked account |
+
+The registrant sees the same page for the first three, by design: the page
+must not reveal who already has an account. To answer "did my registration
+work?", look up the email in the audit log, not by asking the patient to
+register again.
+
+Which units are offered is `PATIENT_REGISTRATION_UNITS` (operator, `.env`).
+In the pilot only test personnummer are accepted
+(`PATIENT_REGISTRATION_SYNTHETIC_ONLY=true`).
+
 ---
 
 ### External Partners

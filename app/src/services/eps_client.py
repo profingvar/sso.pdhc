@@ -136,3 +136,71 @@ def verify_patient(config, ips_patient_guid, care_unit_guid=None):
                 return 'checked'
         raise EpsRefusal(PATIENT_NOT_AT_UNIT)
     return 'checked'
+
+
+# --- #1049: self-registration creates the patient in eps --------------------
+#
+#     POST {EPS_BASE_URL}/api/v1/patients/self-register
+#     Authorization: ApiKey <EPS_API_KEY>        (scope patients:self-register)
+#     {"personnummer", "given_name", "family_name", "care_unit_guid",
+#      "email"?, "mobile"?}
+#
+# eps answers (contract s7.2):
+#     201 {"patient_guid"} + X-PDHC-Patient-Guid   created
+#     409 {"error": "exists"}                       a patient with that number
+#     422 {"error": "unknown_unit"}                 the unit is no active clinic
+# Anything else, and a 409/422 whose body is not eps's own, is UNAVAILABLE:
+# the 404 rule above applies to every status (another vhost can answer).
+# NO development opt-out: without eps there is no patient guid to link.
+
+CREATED = 'created'
+EXISTS = 'exists'
+UNKNOWN_UNIT = 'unknown_unit'
+
+
+def _http_post(url, headers, json_body, timeout):
+    """The ONLY outbound POST. Tests patch this and nothing else."""
+    return requests.post(url, headers=headers, json=json_body, timeout=timeout,
+                         allow_redirects=False)
+
+
+def self_register(config, *, personnummer, given_name, family_name,
+                  care_unit_guid, email=None, mobile=None):
+    """Return (CREATED, platform patient guid) or (EXISTS, None).
+    Raise EpsRefusal(NOT_CONFIGURED | UNAVAILABLE | UNKNOWN_UNIT)."""
+    base = (config.get('EPS_BASE_URL') or '').strip().rstrip('/')
+    key = (config.get('EPS_API_KEY') or '').strip()
+    if not base or not key:
+        raise EpsRefusal(NOT_CONFIGURED, 'EPS_BASE_URL / EPS_API_KEY')
+    body = {'personnummer': personnummer, 'given_name': given_name,
+            'family_name': family_name, 'care_unit_guid': care_unit_guid}
+    if email:
+        body['email'] = email
+    if mobile:
+        body['mobile'] = mobile
+    try:
+        resp = _http_post(f'{base}/api/v1/patients/self-register',
+                          {'Authorization': f'ApiKey {key}',
+                           'Accept': 'application/json'}, body, TIMEOUT_SECONDS)
+    except requests.RequestException as e:
+        raise EpsRefusal(UNAVAILABLE, type(e).__name__)
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    error = str(data.get('error', '')).lower() if isinstance(data, dict) else ''
+    if resp.status_code == 409 and error == 'exists':
+        return EXISTS, None
+    if resp.status_code == 422 and error == 'unknown_unit':
+        raise EpsRefusal(UNKNOWN_UNIT)
+    if resp.status_code != 201 or not isinstance(data, dict):
+        raise EpsRefusal(UNAVAILABLE, f'HTTP {resp.status_code}')
+    import uuid as _uuid
+    try:
+        guid = str(_uuid.UUID(str(data.get('patient_guid') or '')))
+    except ValueError:
+        raise EpsRefusal(UNAVAILABLE, '201 without a usable patient_guid')
+    header = (getattr(resp, 'headers', None) or {}).get('X-PDHC-Patient-Guid')
+    if header and str(header).strip().lower() != guid:
+        raise EpsRefusal(UNAVAILABLE, '201 body and header name different guids')
+    return CREATED, guid

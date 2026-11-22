@@ -46,6 +46,7 @@ def _link_json(link):
             'ips_patient_guid': link.ips_patient_guid,
             'linked_at': pl._iso(link.linked_at),
             'linked_by': link.linked_by_user_guid,
+            'care_unit_guid': link.care_unit_guid,
         },
         'method': link.method,
     }

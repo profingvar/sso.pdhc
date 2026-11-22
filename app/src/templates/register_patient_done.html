@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Tack — sso.pdhc{% endblock %}
+{% block content %}
+{# #1049: the SAME page for every outcome that is not a form error. Nothing
+   on it may depend on whether an account existed or was linked. #}
+<div style="max-width: 500px; margin: 2rem auto;" lang="sv">
+    <div class="card">
+        <h2>Tack</h2>
+        <p>{{ message }}</p>
+        <p class="text-muted">När du loggar in första gången får du lägga till en
+            passkey. Det är en extra nyckel i din telefon eller dator som gör att
+            bara du kan logga in.</p>
+        <a class="btn btn-primary" style="width:100%; display:block; text-align:center;"
+           href="{{ login_url }}">Logga in</a>
+    </div>
+</div>
+{% endblock %}

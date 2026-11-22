@@ -28,11 +28,14 @@ from src.models.second_factor import WebAuthnCredential, TotpSecret
 from src.models.patient_link import (
     PatientLink, PatientLinkHistory, PatientInvite, PatientLinkCode,
 )
+# #1049: the name a self-registered patient gave.
+from src.models.patient_profile import PatientProfile
 
 __all__ = [
     'ReadGrant',
     'WebAuthnCredential', 'TotpSecret', 'LoginLockout',
     'PatientLink', 'PatientLinkHistory', 'PatientInvite', 'PatientLinkCode',
+    'PatientProfile',
     'User', 'Patient', 'Professional', 'Organisation', 'OrganisationAudit',
     'UserOrganisation', 'Group', 'Membership', 'GroupProposal',
     'LeaderRequest', 'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',

@@ -4,6 +4,8 @@ import uuid
 
 import pytest
 
+from tests.eps_register_fake import eps_register  # noqa: F401
+
 from src.app import create_app
 from src.db import get_session
 from src.services.auth_service import hash_password
@@ -416,10 +418,12 @@ class TestOnboardingPages:
     def test_register_patient_page_renders(self, client, app):
         resp = client.get('/register-patient')
         assert resp.status_code == 200
-        assert b'Patient Registration' in resp.data
+        assert 'Registrera dig som patient' in resp.get_data(as_text=True)
         assert b'csrf_token' in resp.data
 
-    def test_register_patient_success(self, client, app):
+    def test_register_patient_success(self, client, app, eps_register):
+        from tests.eps_register_fake import EPS_CFG
+        app.config.update(EPS_CFG)
         with app.app_context():
             s = get_session()
             org = Organisation(name='Reg Org')
@@ -428,11 +432,15 @@ class TestOnboardingPages:
             org_guid = org.guid
 
         resp = client.post('/register-patient', data={
+            'given_name': 'Ny', 'family_name': 'Patient',
             'email': 'newpat@test.com', 'password': 'password123',
             'personnummer': '200001011234', 'organisation_guid': org_guid,
         }, follow_redirects=False)
-        assert resp.status_code == 302
-        assert '/login' in resp.headers['Location']
+        # #1049: the uniform page, with a way on to the login.
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert 'Om uppgifterna kunde registreras kan du logga in nu.' in html
+        assert 'href="/login"' in html
 
     def test_request_access_page_renders(self, client, app):
         resp = client.get('/request-access')

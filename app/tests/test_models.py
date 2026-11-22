@@ -43,7 +43,7 @@ class TestAllTablesCreated:
         'read_grants',  # 2026-11-19: time-limited external CDR read grants
         # #1040: patient second factor + account<->patient link (all new)
         'webauthn_credentials', 'totp_secrets', 'login_lockouts',
-        'patient_links', 'patient_link_history', 'patient_invites',
+        'patient_links', 'patient_link_history', 'patient_invites', 'patient_profiles',
         'patient_link_codes',
     ]
 

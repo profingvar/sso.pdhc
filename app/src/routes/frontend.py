@@ -1813,42 +1813,62 @@ def register_patient():
 
     #904 measured that this route had NO decorator at all, not even a rate
     limit, while the equivalent JSON route (`routes/patient.py::register`)
-    carried `@rate_limit(10/60s)`. Two implementations of one enrolment, and
-    the one with a UI was the less protected. The limit is now the same on
-    both: a human registers once, so ten a minute inconveniences nobody real.
+    carried `@rate_limit(10/60s)`. The limit is the same on both: a human
+    registers once, so ten a minute inconveniences nobody real. It is a rate
+    limit and NOT a gate: self-enrolment is intended.
 
-    This is a rate limit and NOT a gate. Self-enrolment is intended — this
-    page and its template are the evidence — so gating it would break the
-    feature rather than close a hole.
+    #910: both doors call ONE service (`services/patient_enrolment.py`) and
+    the list offers only care units. #1049 (contract s7.1): the service also
+    asks eps to create the patient and links the account when it did; every
+    non-error outcome renders the SAME page (`register_patient_done.html`),
+    so the page never says whether an account already existed.
 
-    #910 fixed the two things #904 left open: both routes now call ONE
-    service (`services/patient_enrolment.py`), and the list offers only care
-    units (operator 2026-11-16) instead of every organisation's guid.
-    Personnummer is deliberately not checksum-validated; see that service.
+    `?next=` is carried to the login link only when `_is_allowed_callback`
+    accepts it (the #1048 rule); anything else is dropped silently.
     """
-    from src.services.patient_enrolment import (EnrolmentRefused, enrol_patient,
-                                                enrollable_choices)
+    from src.routes.second_factor_ui import callback_allowed
+    from src.services.patient_enrolment import (REGISTERED_TEXT, EnrolmentRefused,
+                                                register_patient as register,
+                                                registration_choices)
     db = get_db()
-    # #910: only where a patient can belong (care units), not every
-    # organisation on the platform. The same rule refuses anything else on POST.
     organisations = [{'organisation_guid': g, 'name': n}
-                     for g, n in enrollable_choices(db)]
+                     for g, n in registration_choices(db, current_app.config)]
+    next_url = request.form.get('next', '') if request.method == 'POST' \
+        else request.args.get('next', '')
+    if not callback_allowed(next_url):
+        next_url = ''
+
+    def page(template, status=200, **ctx):
+        resp = current_app.make_response(
+            (render_template(template, organisations=organisations,
+                             next_url=next_url, **ctx), status))
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
 
     if request.method == 'POST':
+        form = request.form
         try:
-            enrol_patient(db, email=request.form.get('email'),
-                          password=request.form.get('password'),
-                          personnummer=request.form.get('personnummer'),
-                          organisation_guid=request.form.get('organisation_guid'),
-                          ip=request.remote_addr)
+            register(db, given_name=form.get('given_name'),
+                     family_name=form.get('family_name'),
+                     personnummer=form.get('personnummer'),
+                     email=form.get('email'), mobile=form.get('mobile'),
+                     organisation_guid=form.get('organisation_guid'),
+                     password=form.get('password'), ip=request.remote_addr)
         except EnrolmentRefused as e:
             for m in e.messages:
-                flash(m[0].upper() + m[1:] + ('' if m.endswith('.') else '.'), 'error')
-            return render_template('register_patient.html', organisations=organisations)
-        flash('Registration successful! You can now log in.', 'success')
-        return redirect(url_for('frontend.login_page'))
+                flash(m, 'error')
+            kept = {k: form.get(k, '') for k in ('given_name', 'family_name',
+                                                 'email', 'mobile',
+                                                 'organisation_guid')}
+            return page('register_patient.html', form=kept)
+        login_url = url_for('frontend.login_page')
+        if next_url:
+            from urllib.parse import urlencode
+            login_url += '?' + urlencode({'next': next_url})
+        return page('register_patient_done.html', message=REGISTERED_TEXT,
+                    login_url=login_url)
 
-    return render_template('register_patient.html', organisations=organisations)
+    return page('register_patient.html', form={})
 
 
 @frontend_bp.route('/join', methods=['GET', 'POST'])

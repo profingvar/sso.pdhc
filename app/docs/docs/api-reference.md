@@ -94,6 +94,13 @@ Authenticate with email and password. Returns JWT token. Supports SSO handshake 
 **Response** `302 Redirect` (SSO handshake):
 Redirects to `{next}?token={JWT}&state={state}`
 
+**A patient account never gets a handshake token here (#1049).** For a patient
+with `next`, the answer is a `302` to `/login?next=…&state=…` and NO token is
+issued: the HTML login asks for (or enrols) the second factor before any
+service gets a token. Audited `login_patient_sent_to_second_factor`. Without
+`next` a patient still gets the JSON token, which says
+`second_factor.verified: false`.
+
 **Errors:**
 
 | Code | Error | Description |
@@ -237,48 +244,67 @@ On success the server also clears `force_change_on_next_login` on the user, so t
 
 **Auth:** None
 **Rate Limit:** 10 req/min per IP
-**FHIR:** Patient resource shape in response
 
-Self-registration for patients. The same rules as the `/register-patient`
-form, which calls the same service (#910).
+Self-registration for patients (#1049, patient app contract s7.1). The same
+rules as the `/register-patient` form, which calls the same service (#910).
 
-`organisation_guid` must be a **care unit** (vårdenhet), or a vårdgivare that
-has no units (it is its own unit). An external partner, a vårdgivare that has
-units, and an unknown guid all answer the same `404 Organisation not found`.
-The personnummer is checked for 12 digits only — deliberately no checksum
-(synthetic numbers carry an invalid one, #405).
+`organisation_guid` must be a unit on the registration list: a **care unit**
+(vårdenhet), or a vårdgivare with no units, narrowed by
+`PATIENT_REGISTRATION_UNITS` when set. Anything else answers the same
+`404 not_found`. The personnummer must be 10 or 12 digits (an optional `-`,
+or `+` in the 10-digit form) with a real date; it is stored as 12 digits.
+With `PATIENT_REGISTRATION_SYNTHETIC_ONLY` (default true) a number whose check
+digit is VALID is refused — the pilot takes only synthetic numbers (wrong check
+digit, #405). `mobile` is optional and must be a Swedish mobile number;
+it is sent to eps as `+467…` and not stored in SSO.
+
+SSO then calls eps `POST {EPS_BASE_URL}/api/v1/patients/self-register`
+(`Authorization: ApiKey <EPS_API_KEY>`, scope `patients:self-register`):
+
+| eps | SSO does |
+|---|---|
+| (email or personnummer already has an account here — eps is not called) | nothing; audit `patient_register_duplicate` |
+| `201 {"patient_guid"}` | account + `patient_link` (`linked_by: "self-registration"`, `care_unit_guid` = the chosen unit), one transaction; audit `patient_self_linked` |
+| `409 {"error": "exists"}` | account UNLINKED (the link-code path); audit `patient_register_unlinked`. Never auto-linked |
+| `422 {"error": "unknown_unit"}` | nothing; `422 unit_not_available` |
+| no answer, any other status or body | nothing; `503 eps_unavailable` |
 
 **Request:**
 ```json
 {
+  "given_name": "Anna", "family_name": "Andersson",
+  "personnummer": "<12 or 10 digits>",
   "email": "patient@example.com",
-  "password": "securepass",
-  "personnummer": "199001011234",
-  "organisation_guid": "org-guid-here"
+  "mobile": "070-123 45 67",
+  "organisation_guid": "<care unit guid>",
+  "password": "securepass"
 }
 ```
 
-**Response** `201 Created`:
+**Response** `202 Accepted` — the SAME body for all three non-error outcomes
+(and held to `PATIENT_REGISTRATION_MIN_SECONDS`), so it says nothing about
+which happened:
 ```json
-{
-  "resourceType": "Patient",
-  "user_guid": "...",
-  "patient_guid": "...",
-  "email": "patient@example.com",
-  "personnummer": "199001011234",
-  "organisation_guid": "...",
-  "in_registry": false,
-  "registries": []
-}
+{"status": "received",
+ "message": "Om uppgifterna kunde registreras kan du logga in nu. Har du redan ett konto loggar du in med det."}
 ```
+It no longer returns the FHIR Patient shape, a guid, or an echo of the input,
+and no longer answers `409 conflict` (#1049; before it, the 409 was an
+enumeration oracle).
 
-**Errors:**
+**Errors** (form errors; `message`/`messages` are Swedish):
 
 | Code | Error | Description |
 |------|-------|-------------|
-| 400 | `validation_error` | Missing/invalid fields |
-| 404 | `not_found` | Organisation not found |
-| 409 | `conflict` | Email or personnummer already registered |
+| 400 | `validation_error` | Missing/invalid fields, incl. the synthetic-only rule ("Piloten tar bara emot testpersonnummer.") |
+| 404 | `not_found` | Unit not on the registration list |
+| 422 | `unit_not_available` | eps has no active clinic for the unit |
+| 503 | `eps_not_configured` / `eps_unavailable` / `not_committed` | "Försök igen om en stund." Nothing was created in SSO |
+
+The HTML form `/register-patient` takes the same fields and renders one page
+(`register_patient_done.html`) for the three non-error outcomes. `?next=<url>`
+is kept (hidden field) and put on the page's **Logga in** link only when
+`_is_allowed_callback` accepts it; otherwise it is dropped.
 
 ---
 
@@ -371,7 +397,8 @@ unit is the one the patient registered at.
 **Response** `200`:
 ```json
 {"user_guid": "…", "method": "link_code",
- "patient_link": {"ips_patient_guid": "…", "linked_at": "…", "linked_by": "…"}}
+ "patient_link": {"ips_patient_guid": "…", "linked_at": "…", "linked_by": "…",
+                  "care_unit_guid": "…"}}
 ```
 
 | Code | Error | When |

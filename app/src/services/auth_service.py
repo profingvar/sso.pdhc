@@ -157,6 +157,12 @@ def build_access_blob(user, session, session_id=None, token_payload=None):
         from src.services.patient_link import link_for_blob
         from src.services.second_factor import second_factor_for_blob
         blob['patient_link'] = link_for_blob(session, user)
+        # #1049: the name a self-registered patient gave (patientapp's /me).
+        # Null when SSO has none (invited and older accounts).
+        from src.models.patient_profile import PatientProfile
+        profile = session.query(PatientProfile).filter_by(user_guid=user.guid).first()
+        blob['display_name'] = (f'{profile.given_name} {profile.family_name}'
+                                if profile else None)
         blob['second_factor'] = second_factor_for_blob(session, user, token_payload)
 
     elif user.user_type == 'professional':

@@ -103,6 +103,10 @@ def link_for_blob(session, user):
         'ips_patient_guid': link.ips_patient_guid,
         'linked_at': _iso(link.linked_at),
         'linked_by': link.linked_by_user_guid,
+        # #1049: the unit the patient chose at registration, the unit of the
+        # invite, or (link code) the unit the patient registered at. Null for
+        # an SU relink that named none.
+        'care_unit_guid': link.care_unit_guid,
     }
 
 

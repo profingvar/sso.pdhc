@@ -18,9 +18,12 @@ This is NOT `models/invite.py`: that `Invite` is a GROUP-join token for
 professionals and stores its token in clear. It was deliberately not reused.
 
 `ips_patient_guid` is the patient GUID from eps.pdhc (formerly ips.pdhc) — the
-`patient_guid` on ServiceRequests and CDR rows (Rule 18). SSO does not call
-eps: it cannot check that the guid exists or that the patient is listed at the
-care unit. The professional who links is the control, and is recorded.
+`patient_guid` on ServiceRequests and CDR rows (Rule 18). SSO checks the guid
+against eps before any link is written (services/eps_client.py, #1040), and
+the professional who links is recorded. `care_unit_guid` is the unit the link
+was made for (#1049: also the unit chosen at self-registration); `method`
+`self_register` with `linked_by_user_guid = 'self-registration'` is a link
+made by self-registration when eps created the patient.
 """
 import uuid
 from datetime import datetime, timezone

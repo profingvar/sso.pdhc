@@ -18,9 +18,18 @@ from src.models.organisation import Organisation
 from src.models.patient import Patient
 from src.models.user import User
 from src.routes import frontend, patient as patient_routes
-from tests.test_frontend import app, client  # noqa: F401
+from tests.test_frontend import app as _base_app, client  # noqa: F401
+from tests.eps_register_fake import EPS_CFG, eps_register  # noqa: F401
 
 PNR_INVALID_CHECKSUM = '199001011234'   # synthetic on purpose (#405)
+
+
+@pytest.fixture
+def app(_base_app, eps_register):
+    """#1049: registration asks eps to create the patient; the fake eps
+    answers 201, so a new registrant is created and linked."""
+    _base_app.config.update(EPS_CFG)
+    return _base_app
 
 
 @pytest.fixture
@@ -40,13 +49,15 @@ def orgs(app):
 @pytest.fixture
 def audited(monkeypatch):
     events = []
-    monkeypatch.setattr('src.services.patient_enrolment.audit',
-                        lambda event, **kw: events.append((event, kw)))
+    for mod in ('src.services.patient_enrolment', 'src.services.patient_link'):
+        monkeypatch.setattr(mod + '.audit',
+                            lambda event, **kw: events.append((event, kw)))
     return events
 
 
 def _form(org, email=None, pnr=PNR_INVALID_CHECKSUM, password='password123'):
-    return {'email': email or f'{uuid.uuid4().hex[:8]}@test.com', 'password': password,
+    return {'given_name': 'Test', 'family_name': 'Testsson',
+            'email': email or f'{uuid.uuid4().hex[:8]}@test.com', 'password': password,
             'personnummer': pnr, 'organisation_guid': org}
 
 
@@ -83,9 +94,10 @@ def test_the_form_offers_units_and_a_unitless_caregiver_ONLY(client, orgs):
 @pytest.mark.parametrize('target', ['a1', 'k'])
 def test_a_care_unit_is_accepted(client, app, orgs, audited, post, target):
     r = post(client, _form(orgs[target]))
-    assert r.status_code in (201, 302)
+    assert r.status_code in (202, 200)
     assert _patients(app) == [(orgs[target], False, [])], "same registry fields on both paths"
-    assert [e for e, _ in audited] == ['patient_register'], "both paths audit"
+    assert [e for e, _ in audited] == ['patient_register', 'patient_link',
+                                       'patient_self_linked'], "both paths audit"
 
 
 @pytest.mark.parametrize('post', [_api, _html], ids=['api', 'html'])
@@ -94,9 +106,9 @@ def test_anything_else_is_refused_with_the_SAME_not_found(client, app, orgs, aud
     guid = orgs.get(target) or str(uuid.uuid4())
     r = post(client, _form(guid))
     if post is _api:
-        assert r.status_code == 404 and r.get_json() == {'error': 'not_found', 'message': 'Organisation not found'}
+        assert r.status_code == 404 and r.get_json() == {'error': 'not_found', 'message': 'Vårdenheten finns inte.'}
     else:
-        assert r.status_code == 200 and 'Organisation not found.' in r.get_data(as_text=True)
+        assert r.status_code == 200 and 'Vårdenheten finns inte.' in r.get_data(as_text=True)
     assert _patients(app) == [] and audited == []
     with app.app_context():
         assert get_session().query(User).filter_by(user_type='patient').count() == 0
@@ -119,8 +131,9 @@ def test_both_paths_refuse_the_same_input(client, app, orgs, bad):
 
 
 def test_an_invalid_checksum_is_ACCEPTED_on_both_paths(client, app, orgs):
-    assert _api(client, _form(orgs['a1'], pnr='199001011234')).status_code == 201
-    assert _html(client, _form(orgs['k'], pnr='200101011234')).status_code == 302
+    assert _api(client, _form(orgs['a1'], pnr='199001011234')).status_code == 202
+    assert _html(client, _form(orgs['k'], pnr='200101011234')).status_code == 200
+    assert len(_patients(app)) == 2
 
 
 # --------------------------------------------------------------- no second copy
@@ -130,5 +143,7 @@ def test_an_invalid_checksum_is_ACCEPTED_on_both_paths(client, app, orgs):
 def test_neither_route_builds_a_patient_itself(fn):
     tree = ast.parse(textwrap.dedent(inspect.getsource(inspect.unwrap(fn))))
     called = {n.func.id for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-    assert 'enrol_patient' in called
+    imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+                and n.module == 'src.services.patient_enrolment' for a in n.names}
+    assert 'register_patient' in imported, "#1049: both doors use the one service"
     assert not ({'User', 'Patient'} & called), "a second enrolment implementation is back"

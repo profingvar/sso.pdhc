@@ -76,6 +76,21 @@ def login():
             return redirect(f"{next_url}?{urlencode(params)}")
         return jsonify({"error": "authentication_failed", "message": "Invalid email or password"}), 401
 
+    # #1049: a PATIENT never gets a token for a service from this route. The
+    # handshake (`next`) used to mint one here with the password alone, which
+    # walked round the second factor that /login enforces (#1040). The browser
+    # is sent to /login with the same next/state instead, and NO token is
+    # issued: there the factor is asked for (or enrolled) before the service
+    # gets one. Without `next` the JSON token below is unchanged: it says
+    # `second_factor.verified: false`, and consumers refuse it (contract s2.2).
+    if next_url and user.user_type == 'patient':
+        audit('login_patient_sent_to_second_factor', user_guid=user.guid,
+              ip=request.remote_addr)
+        params = {'next': next_url}
+        if state:
+            params['state'] = state
+        return redirect('/login?' + urlencode(params))
+
     # Issue JWT
     secret_key = config.get('SECRET_KEY', '')
     expiry_hours = config.get('SESSION_EXPIRY_HOURS', 24)

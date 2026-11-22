@@ -848,15 +848,23 @@ def test_a_professional_who_must_change_password_cannot_link(world):
 # 8. The browser forms (session, not Bearer)
 # =============================================================================
 
-def test_the_whole_self_registered_journey_in_the_browser(world):
+def test_the_whole_self_registered_journey_in_the_browser(world, monkeypatch):
     """Register -> log in -> enrol passkey -> get a code -> care redeems it in
-    the dashboard form -> the patient's next token is linked AND verified."""
+    the dashboard form -> the patient's next token is linked AND verified.
+
+    #1049: eps already holds this patient (409), so registration creates the
+    account UNLINKED and the link code is the way in, as before."""
+    from tests.eps_register_fake import FakeEpsRegister
+    fake = FakeEpsRegister()
+    fake.existing.add('199005051234')
+    monkeypatch.setattr('src.services.eps_client._http_post', fake)
     app = world['app']
     c = app.test_client()
     r = c.post('/register-patient', data={
+        'given_name': 'Self', 'family_name': 'Reg',
         'email': 'self@test.com', 'password': PW, 'personnummer': '199005051234',
         'organisation_guid': world['unit_a']})
-    assert r.status_code == 302
+    assert r.status_code == 200 and len(fake.calls) == 1
     auth = SoftAuthenticator()
     _password_login(c, email='self@test.com')
     assert _enrol_passkey(c, auth).status_code == 201

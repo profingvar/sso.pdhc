@@ -316,6 +316,11 @@ Alembic.
 | `patient_invites` | `token_hash`, `ips_patient_guid`, `care_unit_guid`, creator, `expires_at`, `used_at`, `revoked_at` |
 | `patient_link_codes` | `user_guid`, `code_hash`, `expires_at`, `used_at`, `used_by_user_guid` |
 | `login_lockouts` | one row per user that has failed a password login: `failed_count`, `last_failed_at`, `locked_until` |
+| `patient_profiles` | #1049: one row per self-registered patient: `user_guid` (unique), `given_name`, `family_name` (for the blob's `display_name`). The mobile number is NOT stored in SSO; it goes to eps |
+
+`patient_links.care_unit_guid` existed from #1040 (invite unit, link-code unit);
+#1049 exposes it in the blob and sets it at self-registration. Rows written
+before carry the unit they were made for, or null (SU relink without a unit).
 
 ## Authentication Flow
 
@@ -451,7 +456,14 @@ until care has linked the account. Two entrances, one link step
    eps patient guid and a care unit. The patient opens the one-time link
    (`/patient-invite/<token>`, 7 days), enters email, personnummer and a
    password; the account is created already linked.
-2. **Self-registered.** The patient registers (`/register-patient`), logs in,
+2. **Self-registered** (#1049, contract s7.1). The patient registers
+   (`/register-patient`, or `POST /api/patient/register`); SSO asks eps to
+   create the patient (`POST /api/v1/patients/self-register`). eps `201` ->
+   the account is created AND linked in one transaction (`method`
+   `self_register`, `linked_by` `self-registration`, the chosen unit). eps
+   `409` (eps already knows the number) -> the account is created UNLINKED and
+   the patient continues as below; it is never auto-linked, or anyone could
+   take over an existing patient by typing a number. Unlinked, the patient logs in,
    and asks for a **link code** (`ABCD-EFGH`, one-time, 7 days, only the newest
    works). The patient gives it to the care unit; a professional there enters
    the code together with the eps patient guid.
@@ -654,8 +666,10 @@ Downstream services use it to make authorization decisions.
   "patient_link": {
     "ips_patient_guid": "<eps patient guid>",
     "linked_at": "2026-11-22T09:15:00+00:00",
-    "linked_by": "<user guid of the professional or SU>"
+    "linked_by": "<user guid of the professional or SU, or \"self-registration\">",
+    "care_unit_guid": "<care unit guid or null>"
   },
+  "display_name": "Anna Andersson",
   "second_factor": {
     "enrolled": true,
     "verified": true,
@@ -668,6 +682,8 @@ Downstream services use it to make authorization decisions.
 | Field | Meaning (#1040) |
 |-------|---------|
 | `patient_link` | `null` until care has linked the account to a patient. Always present for a patient |
+| `patient_link.care_unit_guid` | #1049: the unit chosen at registration, the invite's unit, or (link code) the unit the patient registered at; `null` for an SU relink without a unit |
+| `display_name` | #1049: `given_name family_name` from self-registration; `null` when SSO has no name (invited and older accounts). Patients only |
 | `second_factor.enrolled` | The ACCOUNT has at least one passkey or a confirmed TOTP secret |
 | `second_factor.verified` | THIS token was issued after a second factor was presented. `false` for a password-only token, even on an enrolled account |
 | `second_factor.method` | `"passkey"` or `"totp"` when verified, else `null` |
@@ -1050,3 +1066,44 @@ the file's own header states.
 |------|---------|
 | 9000 | Flask application (Gunicorn) |
 | 9003 | PostgreSQL database |
+
+
+## Patient self-registration (#1049)
+
+One service, `services/patient_enrolment.py::register_patient`, behind both
+doors (`/register-patient`, `POST /api/patient/register`). Order of checks,
+and why it is that order:
+
+1. **Form rules** (400/404): names, email, password, mobile, unit on the
+   registration list, personnummer shape + real date + the pilot's
+   synthetic-only rule (`services/personnummer.py`, a per-repo copy of eps's
+   classification). Nothing about any account depends on these.
+2. **eps configured?** (503) — before the duplicate check, so "not
+   configured" is the same answer for an existing address as for a new one.
+3. **Duplicate** (email, or personnummer of an existing SSO patient): nothing
+   is created and eps is NOT asked; the password is still hashed, and the
+   uniform answer is returned.
+4. **eps** creates the patient: 201 -> account + link; 409 -> account
+   unlinked; 422 `unknown_unit` / anything else -> form error, nothing created.
+5. **Commit.** If the account or the link cannot be committed after eps
+   created the patient, everything in SSO is rolled back and
+   `patient_register_not_committed` is audited (with the eps guid). An eps
+   patient without an account is harmless: the next attempt gets eps's 409.
+
+**No enumeration.** Steps 3 and 4's two successful outcomes give the same
+page / the same `202` body, and each is held to
+`PATIENT_REGISTRATION_MIN_SECONDS` (default 1.0) so they take comparable
+time. One residual difference is known: when eps is DOWN, a new registrant
+gets "Försök igen om en stund." while a duplicate still gets the uniform
+answer (eps is never asked for a duplicate). That tells a prober only that
+the email/personnummer is registered at a moment eps is unreachable, which
+the prober cannot cause.
+
+**First login.** The registrant then logs in at `/login` (with `next` when
+the patient app sent them). A patient with no second factor is given a
+session token WITHOUT the second-factor claim and sent to `/second-factor`;
+no service gets a token until a factor is enrolled, after which the browser
+resumes to `next` with a verified token (#1040's rule, unchanged). The JSON
+`POST /api/auth/login` used to mint a handshake token for a patient with the
+password alone; since #1049 it sends a patient with `next` to `/login`
+instead, with no token.

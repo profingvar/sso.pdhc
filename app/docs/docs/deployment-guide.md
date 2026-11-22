@@ -170,6 +170,24 @@ so it opens none of eps's scoped routes. The key value goes into
 `EPS_LINK_CHECK_DISABLED` must **not** be set on the server: sso refuses to
 start with it unless `FLASK_ENV=development`.
 
+#### Patient self-registration (#1049): new keys
+
+| variable | default | set to |
+|---|---|---|
+| `PATIENT_REGISTRATION_UNITS` | empty = every care unit | comma list of care-unit guids the registration form offers (the pilot's units). Narrows only; a guid that is not a care unit is ignored |
+| `PATIENT_REGISTRATION_SYNTHETIC_ONLY` | `true` | leave `true` in the pilot: a personnummer with a VALID check digit is refused. Only the operator sets `false`, and only when the platform is cleared for real patients |
+| `PATIENT_REGISTRATION_MIN_SECONDS` | `1.0` | minimum time of every non-error registration answer (no timing oracle). Raise it if eps round trips get slower than about half of it |
+
+**The eps key now needs a scope.** Self-registration calls
+`POST /api/v1/patients/self-register`, gated in eps by
+`@require_scope("patients:self-register")`. Give SSO's existing eps key that
+ONE scope (and no other), or registration answers "Försök igen om en stund."
+for every new registrant (`eps_unavailable`, eps 403). The link check route
+still needs no scope.
+
+No new table needs data: `python scripts/init_db.py` creates
+`patient_profiles` (additive; `patients` is not altered).
+
 **In patientapp.pdhc's `.env`**: `SSO_CLIENT_ID` and `SSO_CLIENT_SECRET` with
 the same two values as the pair above.
 

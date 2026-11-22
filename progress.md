@@ -1101,3 +1101,25 @@ LOCAL ONLY, not deployed.
 - How the client address looks in production: I did not read the nginx config (operator-owned), so whether `X-Forwarded-For` is set, and whether anything sits in front of nginx, is unknown. If clients collapse into one address the rate limit will 429 everybody.
 - `init_db.py` / the new table on Postgres. NOTE the ordering risk: once this code is deployed, every password login reads `login_lockouts`; if the table is missing, login fails with a 500. Run `init_db.py` before traffic.
 - `scripts/unlock_login.py` was not run; the function it calls is tested.
+
+## 2026-11-22 — #1049: patient self-registration (patient app v2, contract s7.1)
+
+Built against `~/T7_sidewinder/plans/patient_app_contract.md` s7.1 (s1, s6 still apply). LOCAL ONLY: not deployed, no `.env` touched, no call to a live service.
+
+**What changed**
+- ONE service for both doors, `services/patient_enrolment.py::register_patient` (`/register-patient` and `POST /api/patient/register`): given/family name, personnummer, email (login), optional mobile (Swedish, normalised to `+467…`), care unit (registration list, narrowed by `PATIENT_REGISTRATION_UNITS`), password.
+- eps `POST /api/v1/patients/self-register` (`services/eps_client.py::self_register`, `Authorization: ApiKey`). 201 -> account + `patient_link` (`linked_by: self-registration`, unit) in one transaction; 409 -> account UNLINKED; unreachable/unconfigured/odd -> form error, nothing created; a commit failure after eps created the patient rolls back and is audited.
+- Uniform outcome: one page / one `202` body for duplicate, linked and unlinked; duplicates are not sent to eps, hash the password anyway, and every uniform answer is held to `PATIENT_REGISTRATION_MIN_SECONDS`.
+- `PATIENT_REGISTRATION_SYNTHETIC_ONLY` (default true): a VALID check digit is refused ("Piloten tar bara emot testpersonnummer."). 10/12 digits and a real date required (`services/personnummer.py`). Applies to invite acceptance too.
+- `?next=` kept only if `_is_allowed_callback` accepts it; carried to the **Logga in** link.
+- Blob: `patient_link.care_unit_guid` (column already existed from #1040), `display_name` (new table `patient_profiles`).
+- First login: #1040 already sent an unenrolled patient to enrolment before any service token. Gap closed: `POST /api/auth/login` with `next` no longer mints a handshake token for a patient.
+- Swedish, patient-friendly registration page and result page.
+
+**Tests**
+- New `app/tests/test_patient_registration_1049.py`: 58 tests, real routes, auth on, blob through `/api/auth/me/service`; eps faked only at `eps_client._http_post` (`tests/eps_register_fake.py`). Personnummer synthetic; the one valid number used is Skatteverket's published test number (to show the refusal), never printed.
+- Updated to v2 semantics (they encoded what s7.1 replaces): `test_patient_enrolment_910.py`, `test_patient.py::TestPatientRegister`, `test_self_registration_904.py` (the "enumeration oracle is still there" class is inverted: the product decision it waited for was taken; the flag-name guard allows the three named, read config keys), `test_frontend.py` (2), `test_patient_app_1040.py` (journey test: eps 409 -> link code), `test_models.py` (table list).
+- Controls: 21 mutations, each reverting one change; every one makes its tests FAIL on an assertion (no other exception type). Record: `results/2026-11-22T12-38-07Z_results/controls_1049.txt`.
+- Full suite before: 559 passed. After: **617 passed** (559 + 58 new; the updated tests keep their count), 0 failed. Record: `results/2026-11-22T12-38-07Z_results/pytest_full_1049.txt`.
+
+**Operator, at deploy (not done)**: give SSO's eps key the scope `patients:self-register`; set `PATIENT_REGISTRATION_UNITS`; run `scripts/init_db.py` (creates `patient_profiles`). eps must have shipped s7.2 first. Deviations: `[v2 sso]` lines in the contract.

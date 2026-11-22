@@ -604,3 +604,23 @@ Survey: sso_app is the only service with a FILE audit log; the rest keep audit i
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_login_lockout_1040.py (NEW), /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_models.py
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/user-guide.md, admin-manual.md, api-reference.md, architecture.md, deployment-guide.md
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/progress.md, changed_files.md
+
+## 2026-11-22 — #1049: patient self-registration (patient app v2, contract s7.1)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/patient_enrolment.py — register_patient (both doors): fields, eps self-register, link in one transaction, uniform outcome, timing floor; enrol_patient kept for invites
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/personnummer.py (NEW) — 10/12 digits, real date, synthetic/real_format classification
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/eps_client.py — self_register (POST /api/v1/patients/self-register), _http_post
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/patient_link.py — blob patient_link.care_unit_guid
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/auth_service.py — patient blob display_name
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/models/patient_profile.py (NEW), /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/models/__init__.py, /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/models/patient_link.py (docstring)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/patient.py — JSON door, uniform 202
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — HTML door, ?next= via _is_allowed_callback, uniform page
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/auth.py — POST /api/auth/login: no handshake token for a patient
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/patient_access.py — care_unit_guid in link JSON
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/config.py, /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/app.py — PATIENT_REGISTRATION_UNITS / _SYNTHETIC_ONLY / _MIN_SECONDS
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/.env.example — the three keys, no values
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/register_patient.html (Swedish), /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/register_patient_done.html (NEW)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_patient_registration_1049.py (NEW), /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/eps_register_fake.py (NEW)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_patient_enrolment_910.py, test_patient.py, test_self_registration_904.py, test_frontend.py, test_patient_app_1040.py, test_models.py — updated to v2 semantics
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/user-guide.md, api-reference.md, architecture.md, admin-manual.md, deployment-guide.md
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/sso.pdhc/changed_files.md
+- /Users/martiningvar/T7_sidewinder/plans/patient_app_contract.md — seven `[v2 sso]` Deviations lines (outside this repo)

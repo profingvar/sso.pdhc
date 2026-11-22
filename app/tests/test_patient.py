@@ -10,6 +10,7 @@ from src.services.jwt_service import issue_token
 from src.models.user import User
 from src.models.patient import Patient
 from src.models.organisation import Organisation
+from tests.eps_register_fake import EPS_CFG, eps_register  # noqa: F401
 
 
 SECRET = 'test-secret-key-not-for-production'
@@ -107,80 +108,78 @@ def _login(client, email, password):
 
 # --- Register ---
 
+UNIFORM = {'status': 'received',
+           'message': 'Om uppgifterna kunde registreras kan du logga in nu. '
+                      'Har du redan ett konto loggar du in med det.'}
+
+
+def _reg(client, **fields):
+    body = {'given_name': 'Test', 'family_name': 'Testsson', 'password': 'newpass12'}
+    body.update(fields)
+    return client.post('/api/patient/register', json=body)
+
+
+def _n_patients(app):
+    with app.app_context():
+        s = get_session()
+        n = s.query(Patient).count()
+        s.close()
+        return n
+
+
 class TestPatientRegister:
-    def test_register_success(self, client, seed_data):
-        resp = client.post('/api/patient/register', json={
-            'email': 'newpatient@test.com',
-            'password': 'newpass12',
-            'personnummer': '200101011234',
-            'organisation_guid': seed_data['org_guid'],
-        })
-        assert resp.status_code == 201
-        data = resp.get_json()
-        assert data['resourceType'] == 'Patient'
-        assert data['email'] == 'newpatient@test.com'
-        assert data['personnummer'] == '200101011234'
-        assert data['organisation_guid'] == seed_data['org_guid']
-        assert data['in_registry'] is False
-        assert 'user_guid' in data
-        assert 'patient_guid' in data
+    """#1049: the JSON door answers ONE uniform 202 for every non-error
+    outcome; it no longer echoes the patient or says "conflict"."""
+
+    @pytest.fixture(autouse=True)
+    def _eps(self, app, eps_register):
+        app.config.update(EPS_CFG)
+
+    def test_register_success(self, client, app, seed_data):
+        resp = _reg(client, email='newpatient@test.com', personnummer='200101011234',
+                    organisation_guid=seed_data['org_guid'])
+        assert resp.status_code == 202
+        assert resp.get_json() == UNIFORM
+        with app.app_context():
+            s = get_session()
+            u = s.query(User).filter_by(email='newpatient@test.com').one()
+            p = s.query(Patient).filter_by(user_id=u.id).one()
+            assert (u.user_type, p.organisation_guid, p.in_registry) == \
+                ('patient', seed_data['org_guid'], False)
+            s.close()
 
     def test_register_invalid_personnummer_too_short(self, client, seed_data):
-        resp = client.post('/api/patient/register', json={
-            'email': 'new2@test.com',
-            'password': 'newpass12',
-            'personnummer': '19900101',
-            'organisation_guid': seed_data['org_guid'],
-        })
+        resp = _reg(client, email='new2@test.com', personnummer='19900101',
+                    organisation_guid=seed_data['org_guid'])
         assert resp.status_code == 400
         data = resp.get_json()
         assert 'personnummer' in str(data['messages'])
 
     def test_register_invalid_personnummer_non_digits(self, client, seed_data):
-        resp = client.post('/api/patient/register', json={
-            'email': 'new3@test.com',
-            'password': 'newpass12',
-            'personnummer': '19900101ABCD',
-            'organisation_guid': seed_data['org_guid'],
-        })
+        resp = _reg(client, email='new3@test.com', personnummer='19900101ABCD',
+                    organisation_guid=seed_data['org_guid'])
         assert resp.status_code == 400
 
-    def test_register_duplicate_email(self, client, seed_data):
-        resp = client.post('/api/patient/register', json={
-            'email': 'existing@test.com',
-            'password': 'newpass12',
-            'personnummer': '200201011234',
-            'organisation_guid': seed_data['org_guid'],
-        })
-        assert resp.status_code == 409
-        assert resp.get_json()['error'] == 'conflict'
+    def test_register_duplicate_email(self, client, app, seed_data):
+        resp = _reg(client, email='existing@test.com', personnummer='200201011234',
+                    organisation_guid=seed_data['org_guid'])
+        assert resp.status_code == 202 and resp.get_json() == UNIFORM
+        assert _n_patients(app) == 1
 
-    def test_register_duplicate_personnummer(self, client, seed_data):
-        resp = client.post('/api/patient/register', json={
-            'email': 'unique@test.com',
-            'password': 'newpass12',
-            'personnummer': '199001011234',
-            'organisation_guid': seed_data['org_guid'],
-        })
-        assert resp.status_code == 409
-        assert resp.get_json()['error'] == 'conflict'
+    def test_register_duplicate_personnummer(self, client, app, seed_data):
+        resp = _reg(client, email='unique@test.com', personnummer='199001011234',
+                    organisation_guid=seed_data['org_guid'])
+        assert resp.status_code == 202 and resp.get_json() == UNIFORM
+        assert _n_patients(app) == 1
 
     def test_register_nonexistent_organisation(self, client, seed_data):
-        resp = client.post('/api/patient/register', json={
-            'email': 'new4@test.com',
-            'password': 'newpass12',
-            'personnummer': '200301011234',
-            'organisation_guid': str(uuid.uuid4()),
-        })
+        resp = _reg(client, email='new4@test.com', personnummer='200301011234',
+                    organisation_guid=str(uuid.uuid4()))
         assert resp.status_code == 404
 
     def test_register_password_too_short(self, client, seed_data):
-        resp = client.post('/api/patient/register', json={
-            'email': 'new5@test.com',
-            'password': 'short',
-            'personnummer': '200401011234',
-            'organisation_guid': seed_data['org_guid'],
-        })
+        resp = _reg(client, email='new5@test.com', password='short',
+                    personnummer='200401011234', organisation_guid=seed_data['org_guid'])
         assert resp.status_code == 400
 
     def test_register_missing_fields(self, client, seed_data):
@@ -193,12 +192,8 @@ class TestPatientRegister:
 
     def test_register_can_login_after(self, client, seed_data):
         """After registration, new patient can log in."""
-        client.post('/api/patient/register', json={
-            'email': 'logintest@test.com',
-            'password': 'loginpass1',
-            'personnummer': '200501011234',
-            'organisation_guid': seed_data['org_guid'],
-        })
+        _reg(client, email='logintest@test.com', password='loginpass1',
+             personnummer='200501011234', organisation_guid=seed_data['org_guid'])
         resp = _login(client, 'logintest@test.com', 'loginpass1')
         assert resp.status_code == 200
         assert 'token' in resp.get_json()

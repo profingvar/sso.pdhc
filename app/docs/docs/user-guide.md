@@ -153,17 +153,32 @@ redirect to change-password in that case.
 
 ### Registration
 
-1. Go to `/register-patient`
-2. Fill in:
-   - **Email** — your email address
-   - **Password** — minimum 8 characters
-   - **Personnummer** — exactly 12 digits (Swedish personal identity number)
-   - **Organisation** — select from the dropdown
-3. Submit — your account is created immediately
-4. You can now log in
+1. Go to `/register-patient` (the patient app's **Registrera dig** button sends
+   you there, with `?next=` set so the login afterwards returns to the app).
+2. Fill in (the page is in Swedish, #1049):
+   - **Förnamn**, **Efternamn**
+   - **Personnummer** — 10 or 12 digits with a real date. *In the pilot only
+     test numbers are accepted*: a number whose check digit is correct is
+     refused with "Piloten tar bara emot testpersonnummer."
+   - **E-post** — this is your login
+   - **Mobilnummer** — optional; `07…` is stored as `+467…` (in eps, not in SSO)
+   - **Din vårdenhet** — select from the list
+   - **Lösenord** — minimum 8 characters
+3. Submit. The page then says *"Om uppgifterna kunde registreras kan du logga
+   in nu. Har du redan ett konto loggar du in med det."* — the SAME text whether
+   your account was just created or you already had one (so the page cannot be
+   used to find out who is registered).
+4. Choose **Logga in**. At the first login you add a passkey before you reach
+   the patient app.
 
-Only care units are offered in the list. If your care unit has **invited** you,
-use the link they gave you instead — see the section below.
+Behind the page, SSO asks eps (the patient register) to create you as a
+patient at the unit you chose. If eps did, your account is linked to your care
+unit straight away. If eps already knew you, the account is created but not
+linked: use **Skapa länkkod** (below). If eps cannot be reached, nothing is
+created and the page says "Försök igen om en stund."
+
+If your care unit has **invited** you, use the link they gave you instead — see
+the section below.
 
 ### Logging In
 
@@ -220,13 +235,20 @@ en andra faktor och en koppling till din vårdenhet. Det finns två vägar dit.
    stället koppla en autentiseringsapp.
 5. Gå till <https://patientapp.pdhc.se> och logga in.
 
-**Väg 2: Du registrerar dig själv**
+**Väg 2: Du registrerar dig själv i appen**
 
-1. Gå till <https://sso.pdhc.se> och välj **Register**. Fyll i e-post,
-   lösenord och personnummer, och välj din vårdenhet i listan.
-2. Logga in med e-post och lösenord.
-3. Lägg till en andra faktor på samma sätt som i väg 1, steg 4.
-4. Välj **Skapa länkkod** på din sida. Du får en kod som ser ut så här:
+1. Öppna <https://patientapp.pdhc.se> och välj **Registrera dig**. Fyll i
+   förnamn, efternamn, personnummer, e-post, gärna mobilnummer, välj din
+   vårdenhet och ett lösenord på minst åtta tecken.
+   *Under piloten går det bara att använda testpersonnummer.*
+2. Sidan säger: "Om uppgifterna kunde registreras kan du logga in nu. Har du
+   redan ett konto loggar du in med det." Välj **Logga in**.
+3. Logga in med e-post och lösenord. Första gången lägger du till en passkey
+   (eller en autentiseringsapp) innan du kommer vidare. Sedan kommer du till
+   patientappen.
+4. Oftast är kontot då redan kopplat till din vårdenhet. Säger patientappen att
+   kontot inte är kopplat, gör du så här: logga in på <https://sso.pdhc.se> och
+   välj **Skapa länkkod** på din sida. Du får en kod som ser ut så här:
    `ABCD-EFGH`. Koden visas bara en gång och gäller i sju dagar.
 5. **Ge koden till din vårdenhet**, till exempel vid ett besök eller i telefon.
    Vårdenheten kopplar då ditt konto till dig som patient.
@@ -241,6 +263,10 @@ en andra faktor och en koppling till din vårdenhet. Det finns två vägar dit.
   vårdenheten.
 - *Länken från vårdenheten gäller inte.* Den är redan använd eller för gammal.
   Be vårdenheten om en ny.
+- *Sidan säger "Försök igen om en stund."* Patientregistret svarade inte.
+  Inget konto skapades. Försök igen senare.
+- *Sidan säger "Piloten tar bara emot testpersonnummer."* Under piloten tar vi
+  inte emot riktiga personnummer.
 - *Du har bytt eller tappat din telefon.* Kontakta din vårdenhet, så får du
   lägga till en ny andra faktor.
 

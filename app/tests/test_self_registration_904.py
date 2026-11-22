@@ -39,6 +39,7 @@ import pytest
 from src.app import create_app
 from src.db import get_session
 from src.models.organisation import Organisation
+from tests.eps_register_fake import EPS_CFG, eps_register  # noqa: F401
 
 SECRET = 'test-secret-key-not-for-production'
 
@@ -67,7 +68,10 @@ def app():
 
 
 @pytest.fixture
-def client(app):
+def client(app, eps_register):
+    # #1049: registration asks eps to create the patient (fake at the HTTP
+    # boundary, tests/eps_register_fake.py).
+    app.config.update(EPS_CFG)
     return app.test_client()
 
 
@@ -109,12 +113,17 @@ class TestPersonnummerIsDeliberatelyNotChecksummed:
         pnr = '200303031234'
         assert not _luhn_ok(pnr), "pick a number that fails Luhn"
         r = client.post('/api/patient/register', json={
+            'given_name': 'Test', 'family_name': 'Testsson',
             'email': f'synthetic-{uuid.uuid4().hex[:8]}@example.test',
             'password': 'password123',
             'personnummer': pnr,
             'organisation_guid': org_guid,
         })
-        assert r.status_code == 201, r.get_data(as_text=True)
+        # #1049: 202 is the uniform answer; the account must really exist.
+        assert r.status_code == 202, r.get_data(as_text=True)
+        from src.models.patient import Patient
+        with client.application.app_context():
+            assert get_session().query(Patient).filter_by(personnummer=pnr).count() == 1
 
     def test_the_shape_check_is_still_enforced(self, client, org_guid):
         """Not checksummed is not unvalidated. Twelve digits, exactly."""
@@ -198,14 +207,27 @@ class TestTheDocstringNoLongerPromisesAGateThatDoesNotExist:
         stale note."""
         import pathlib
         root = pathlib.Path(__file__).parent.parent / 'src'
+        # #1049 added three REAL settings whose names contain
+        # PATIENT_REGISTER (contract s7.1). None of them switches
+        # registration on or off — they narrow the unit list, refuse a valid
+        # personnummer, and set a timing floor — and all three are read in
+        # services/patient_enrolment.py. Any other such name is still a hit.
+        allowed = {'PATIENT_REGISTRATION_UNITS',
+                   'PATIENT_REGISTRATION_SYNTHETIC_ONLY',
+                   'PATIENT_REGISTRATION_MIN_SECONDS'}
         hits = []
         for f in root.rglob('*.py'):
             text = f.read_text()
             for name in ('ALLOW_SELF_REG', 'SELF_ENROL',
                          'SELF_REGISTRATION', 'PATIENT_REGISTER'):
-                if name in text:
-                    hits.append((str(f.name), name))
+                for m in re.finditer(r'[A-Z_]*' + name + r'[A-Z_]*', text):
+                    if m.group(0) not in allowed:
+                        hits.append((str(f.name), m.group(0)))
         assert hits == [], hits
+        svc = (root / 'services' / 'patient_enrolment.py').read_text()
+        for name in allowed:
+            assert f"config.get('{name}'" in svc, f"{name} is not read"
+
 
 
 # ======================================================================
@@ -252,29 +274,28 @@ class TestTheTwoEnrolmentPaths:
         assert want in fe_src[max(0, i - 400):i]
 
 
-class TestTheEnumerationOracleIsStillThere:
-    """Not fixed, and asserted so it is a known state rather than an
-    assumption. Both paths tell an anonymous caller whether a personnummer
-    is already enrolled — the JSON one with a 409, the HTML one with a
-    flash. Rate-limited now, which raises the cost without removing it.
+class TestTheEnumerationOracleIsGone:
+    """This class used to assert the oracle was still there (a duplicate
+    personnummer answered 409) and called removing it "a product decision,
+    not a developer's". The product decision was taken (operator 2026-11-22,
+    #1049 contract s7.1): one answer for every non-error outcome. So the
+    assertion is inverted, not deleted."""
 
-    Left alone deliberately: a registration form that cannot say "this is
-    already registered" cannot be used, and hiding it behind a generic
-    error makes the feature worse without making enumeration impossible.
-    That is a product decision, not a developer's.
-    """
-
-    def test_a_duplicate_personnummer_still_409s(self, client, org_guid):
-        pnr = '199909091234'
+    def test_a_duplicate_personnummer_gets_the_same_answer(self, client, org_guid):
+        pnr = '199909091235'   # 199909091234 has a VALID check digit
+        assert not _luhn_ok(pnr)
         first = client.post('/api/patient/register', json={
+            'given_name': 'A', 'family_name': 'A',
             'email': f'dup-a-{uuid.uuid4().hex[:6]}@example.test',
             'password': 'password123',
             'personnummer': pnr, 'organisation_guid': org_guid,
         })
-        assert first.status_code == 201, first.get_data(as_text=True)
+        assert first.status_code == 202, first.get_data(as_text=True)
         second = client.post('/api/patient/register', json={
+            'given_name': 'B', 'family_name': 'B',
             'email': f'dup-b-{uuid.uuid4().hex[:6]}@example.test',
             'password': 'password123',
             'personnummer': pnr, 'organisation_guid': org_guid,
         })
-        assert second.status_code == 409
+        assert (second.status_code, second.get_data()) == \
+            (first.status_code, first.get_data())

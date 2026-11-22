@@ -53,6 +53,20 @@ class Config:
     # unless FLASK_ENV=development.
     EPS_LINK_CHECK_DISABLED = os.environ.get('EPS_LINK_CHECK_DISABLED', '')
 
+    # #1049 patient self-registration (contract s7.1).
+    # Comma list of care-unit guids the registration form offers. Empty = every
+    # enrollable care unit. Narrows only: a guid that is not a care unit is
+    # not offered.
+    PATIENT_REGISTRATION_UNITS = os.environ.get('PATIENT_REGISTRATION_UNITS', '')
+    # Default TRUE: refuse a personnummer whose check digit is VALID (it may be
+    # a real person's). Only synthetic numbers (wrong check digit) in the pilot.
+    PATIENT_REGISTRATION_SYNTHETIC_ONLY = os.environ.get(
+        'PATIENT_REGISTRATION_SYNTHETIC_ONLY', 'true')
+    # Every non-error registration answer takes at least this long, so
+    # "already registered" cannot be told from "created" by timing.
+    PATIENT_REGISTRATION_MIN_SECONDS = float(os.environ.get(
+        'PATIENT_REGISTRATION_MIN_SECONDS', '1.0'))
+
     # Service credentials: collected as dict {client_id: secret}
     SERVICE_CREDENTIALS = {}
 
@@ -107,3 +121,6 @@ class TestConfig(Config):
     EPS_BASE_URL = ''
     EPS_API_KEY = ''
     EPS_LINK_CHECK_DISABLED = ''
+    PATIENT_REGISTRATION_UNITS = ''
+    PATIENT_REGISTRATION_SYNTHETIC_ONLY = 'true'
+    PATIENT_REGISTRATION_MIN_SECONDS = 0.0
