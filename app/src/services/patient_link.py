@@ -13,12 +13,18 @@ to the care unit in question, or an SU admin. "The care unit in question" is
 the unit named on the invite, or, for a link code, the unit the patient chose
 when registering (`Patient.organisation_guid`).
 
-What SSO cannot check, stated because it is the weak point: SSO has no client
-to eps/ips, so it cannot verify that `ips_patient_guid` exists or that this
-patient is listed at that care unit. It checks the PROFESSIONAL (affiliated to
-the unit they name) and records them; the pairing of account and patient rests
-on that person. A wrong guid here shows one patient another patient's tasks,
-which is why a link is never editable by the unit: changing it is SU only.
+The patient guid is CHECKED AGAINST EPS (`_eps_check`, services/eps_client.py)
+at each of the three points where a guid enters: invite creation, link-code
+redemption, SU relink. The guid must exist in eps and the patient must be
+listed at the care unit the link is made for (for an SU relink the unit check
+applies when a unit is named). It fails closed and by name; no link, invite or
+history row is written on a refusal. The check runs only AFTER the caller has
+passed the affiliation gate, so nobody outside the gate learns from it whether
+a guid exists. A wrong guid shows one patient another patient's tasks, which
+is also why a link is never editable by the unit: changing it is SU only.
+
+Accepting an invite does not ask eps again: the guid was checked when the
+invite was created, at most seven days earlier.
 
 One account <-> one patient, in both directions, enforced by unique
 constraints on `patient_links` as well as checked here.
@@ -32,7 +38,9 @@ from src.models.patient_link import (
     PatientInvite, PatientLink, PatientLinkCode, PatientLinkHistory,
 )
 from src.models.user import User
-from src.services import secret_store
+from flask import current_app
+
+from src.services import eps_client, secret_store
 from src.services.activation_service import is_activated
 from src.services.affiliation_service import active_affiliations
 from src.services.audit_log import audit
@@ -123,6 +131,34 @@ def _require_linker(actor):
                           'Change your password before linking patients')
 
 
+# --- the eps check ----------------------------------------------------------
+
+_EPS_ANSWERS = {
+    eps_client.NOT_CONFIGURED: (503, 'The patient register (eps) is not configured on this server'),
+    eps_client.UNAVAILABLE: (503, 'The patient register (eps) did not answer. Nothing was linked; try again'),
+    eps_client.PATIENT_NOT_FOUND: (404, 'No patient with this guid in eps'),
+    eps_client.PATIENT_NOT_AT_UNIT: (409, 'This patient is not listed at this care unit in eps'),
+}
+
+
+def _eps_check(actor, ips_patient_guid, care_unit_guid, where, ip=None):
+    """Ask eps; turn a refusal into an audited LinkRefused. Call it only after
+    the actor has passed the affiliation / SU gate for `care_unit_guid`."""
+    try:
+        outcome = eps_client.verify_patient(current_app.config, ips_patient_guid,
+                                            care_unit_guid)
+    except eps_client.EpsRefusal as e:
+        audit('patient_link_refused', user_guid=actor.guid,
+              detail={'reason': e.code, 'where': where, 'eps_detail': e.detail,
+                      'ips_patient_guid': ips_patient_guid,
+                      'care_unit_guid': care_unit_guid}, ip=ip)
+        status, message = _EPS_ANSWERS[e.code]
+        raise LinkRefused(status, e.code, message)
+    if outcome == 'skipped':
+        audit('patient_link_eps_check_skipped', user_guid=actor.guid,
+              detail={'where': where, 'ips_patient_guid': ips_patient_guid}, ip=ip)
+
+
 # --- the one link step ------------------------------------------------------
 
 def _set_link(session, *, user, ips_patient_guid, actor_guid, method,
@@ -177,6 +213,7 @@ def create_invite(session, actor, *, ips_patient_guid, care_unit_guid,
             ips_patient_guid=ips_patient_guid).first() is not None:
         raise LinkRefused(409, 'patient_already_linked',
                           'This patient is already linked to an account')
+    _eps_check(actor, ips_patient_guid, care_unit_guid, 'invite', ip=ip)
     token = secrets.token_urlsafe(32)
     invite = PatientInvite(
         token_hash=secret_store.keyed_hash(secret_key, 'patient-invite', token),
@@ -307,6 +344,10 @@ def redeem_link_code(session, actor, *, code, ips_patient_guid, secret_key, ip=N
     unit = patient.organisation_guid if patient else None
     if not _may_act_for_unit(session, actor, unit):
         raise refuse('not_affiliated')
+    # Only now: the caller holds a valid code AND may act for the unit, so
+    # what eps says goes to somebody inside the gate. A refusal here does not
+    # burn the code.
+    _eps_check(actor, ips_patient_guid, unit, 'link_code', ip=ip)
 
     link = _set_link(session, user=user, ips_patient_guid=ips_patient_guid,
                      actor_guid=actor.guid, method='link_code',
@@ -318,8 +359,12 @@ def redeem_link_code(session, actor, *, code, ips_patient_guid, secret_key, ip=N
 
 # --- SU only: relink / unlink -----------------------------------------------
 
-def su_relink(session, actor, *, user_guid, ips_patient_guid, reason, ip=None):
-    """Point an account at another patient (or link one that has no link)."""
+def su_relink(session, actor, *, user_guid, ips_patient_guid, reason,
+              care_unit_guid=None, ip=None):
+    """Point an account at another patient (or link one that has no link).
+
+    The guid must exist in eps. When `care_unit_guid` is named, the patient
+    must also be listed there, and the link records that unit."""
     if not actor.is_su_admin:
         raise LinkRefused(403, 'forbidden', 'SU admin access required')
     ips_patient_guid = normalise_guid(ips_patient_guid)
@@ -333,14 +378,19 @@ def su_relink(session, actor, *, user_guid, ips_patient_guid, reason, ip=None):
     if other is not None and other.user_guid != user.guid:
         raise LinkRefused(409, 'patient_already_linked',
                           'This patient is already linked to another account')
+    care_unit_guid = (care_unit_guid or '').strip() or None
+    _eps_check(actor, ips_patient_guid, care_unit_guid, 'su_relink', ip=ip)
     link = current_link(session, user.guid)
     previous = link.ips_patient_guid if link else None
     if link is None:
         link = PatientLink(user_guid=user.guid, ips_patient_guid=ips_patient_guid,
+                           care_unit_guid=care_unit_guid,
                            linked_by_user_guid=actor.guid, method='su_relink',
                            linked_at=_utcnow())
         session.add(link)
     else:
+        if care_unit_guid:
+            link.care_unit_guid = care_unit_guid
         link.ips_patient_guid = ips_patient_guid
         link.linked_by_user_guid = actor.guid
         link.linked_at = _utcnow()

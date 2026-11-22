@@ -215,6 +215,7 @@ en andra faktor och en koppling till din vårdenhet. Det finns två vägar dit.
 
 - *Patientappen säger att kontot inte är kopplat.* Vårdenheten har inte lagt in
   din kod ännu. Skapa en ny kod om den gamla har gått ut, och ge den till
+  vårdenheten. Vårdenheten kan bara koppla dig om du är listad hos just den
   vårdenheten.
 - *Länken från vårdenheten gäller inte.* Den är redan använd eller för gammal.
   Be vårdenheten om en ny.
@@ -236,6 +237,15 @@ the account will see that patient's tasks.
 
 You can do this for the care units you are affiliated to. A link cannot be
 changed afterwards except by an SU admin.
+
+Before anything is linked, the guid is checked against eps: the patient must
+exist there and be listed at the care unit. If it is refused:
+
+- **No patient with this guid in eps** — the guid is wrong; copy it again.
+- **This patient is not listed at this care unit in eps** — wrong patient or
+  wrong unit, or the listing is missing in eps.
+- **The patient register (eps) did not answer** — nothing was linked; try again
+  later. The patient's link code is not used up.
 
 ### Viewing Registry Status
 

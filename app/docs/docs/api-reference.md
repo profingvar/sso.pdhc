@@ -347,6 +347,13 @@ SU admin. `care_unit_guid` may be omitted when the caller has exactly one unit.
 | 403 | `forbidden` / `not_affiliated` / `must_change_password` | Not a professional; not affiliated to that unit (or not activated); password change pending |
 | 404 | `not_found` | Not a care unit a patient can belong to |
 | 409 | `patient_already_linked` | That patient already has an account |
+| 404 | `patient_not_found` | eps does not know this patient guid |
+| 409 | `patient_not_at_unit` | The patient is not listed at `care_unit_guid` in eps |
+| 503 | `eps_not_configured` / `eps_unavailable` | eps is not configured on this server / did not give a usable answer. Nothing was created |
+
+The eps check runs only for a caller who passed the affiliation gate; see
+*Architecture → The eps check*. The same four answers apply to
+`/patient-links/redeem` and to the SU relink below.
 
 ### `DELETE /api/patient-links/invites/<invite_guid>`
 
@@ -372,12 +379,15 @@ unit is the one the patient registered at.
 | 403 | `forbidden` / `must_change_password` | Not a professional or SU; password change pending |
 | 404 | `link_code_not_found` | Unknown, used or expired code — **and** a valid code of a patient at a unit the caller is not affiliated to. One answer for all, by design |
 | 409 | `patient_already_linked` / `account_already_linked` | One account ↔ one patient |
+| 404 / 409 / 503 | `patient_not_found` / `patient_not_at_unit` / `eps_not_configured` / `eps_unavailable` | The eps check, against the unit the patient registered at. The code is NOT used up by these |
 
 ### `PUT /api/admin/patient-links/<user_guid>` · `DELETE …`
 
-SU admin only. `PUT {"ips_patient_guid": "…", "reason": "…"}` relinks (or links
-an unlinked account); `DELETE {"reason": "…"}` unlinks. `reason` is required and
-recorded in `patient_link_history` and the audit log.
+SU admin only. `PUT {"ips_patient_guid": "…", "reason": "…", "care_unit_guid": "…"}`
+relinks (or links an unlinked account); `DELETE {"reason": "…"}` unlinks.
+`reason` is required and recorded in `patient_link_history` and the audit log.
+The patient guid must exist in eps. `care_unit_guid` is optional: when given,
+the patient must also be listed at that unit in eps, and the link records it.
 
 ### `GET /api/auth/second-factor`
 

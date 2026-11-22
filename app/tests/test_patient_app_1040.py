@@ -29,6 +29,7 @@ from urllib.parse import parse_qs, urlparse
 import cbor2
 import pyotp
 import pytest
+import requests
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
@@ -97,6 +98,52 @@ class SoftAuthenticator:
                              'signature': bytes_to_base64url(sig)}}
 
 
+# --- a fake eps: the ONLY thing patched is the outbound HTTP call -------------
+
+class _Resp:
+    def __init__(self, status, body):
+        self.status_code, self._body = status, body
+
+    def json(self):
+        if isinstance(self._body, str):
+            raise ValueError('not json')
+        return self._body
+
+
+class FakeEps:
+    """Stands where `eps_client._http_get` is. `patients` maps a patient guid
+    to the clinics eps would list, in eps's own shape (models/clinic.py):
+    each clinic has its OWN `guid` and the sso unit as `care_unit_guid`."""
+
+    def __init__(self):
+        self.patients, self.mode, self.calls = {}, 'ok', []
+
+    def list_at(self, patient, *units, active=True, clinic_guid=None):
+        self.patients[patient] = [
+            {'guid': clinic_guid or str(uuid.uuid4()), 'organisation_guid': u,
+             'care_unit_guid': u, 'is_active': active, 'name': 'Clinic'}
+            for u in units]
+
+    def __call__(self, url, headers, timeout):
+        self.calls.append({'url': url, 'headers': dict(headers)})
+        if self.mode == 'down':
+            raise requests.ConnectionError('refused')
+        if self.mode == 'timeout':
+            raise requests.Timeout('slow')
+        if self.mode in (401, 403, 500, 502, 302):
+            return _Resp(self.mode, {'resourceType': 'OperationOutcome'})
+        if self.mode == 'foreign404':        # another vhost answering for eps
+            return _Resp(404, {'error': 'not_found', 'service': '1177.pdhc'})
+        if self.mode == 'html404':
+            return _Resp(404, '<html>404</html>')
+        if self.mode == 'garbage200':
+            return _Resp(200, {'unexpected': True})
+        guid = url.rsplit('/patients/', 1)[1].split('/')[0]
+        if guid not in self.patients:
+            return _Resp(404, {'error': 'Patient not found'})
+        return _Resp(200, self.patients[guid])
+
+
 # --- fixtures ----------------------------------------------------------------
 
 @pytest.fixture
@@ -124,15 +171,20 @@ def _make_app(**extra):
         'SERVICE_CREDENTIALS': {'test-client': 'test-secret'},
         'WEBAUTHN_RP_ID': RP_ID, 'WEBAUTHN_ORIGIN': ORIGIN,
         'PATIENTAPP_URL': 'https://patientapp.example.test',
+        'EPS_BASE_URL': 'http://eps.test', 'EPS_API_KEY': 'eps-test-key',
+        'FLASK_ENV': 'production', 'EPS_LINK_CHECK_DISABLED': '',
     }
     cfg.update(extra)
     return create_app(cfg)
 
 
 @pytest.fixture
-def world(events):
+def world(events, monkeypatch):
     """Two care units, a professional affiliated to each, an SU, a patient
-    registered at unit A (not linked, no second factor)."""
+    registered at unit A (not linked, no second factor). eps is the fake
+    above and lists IPS_1 and IPS_2 at unit A."""
+    eps = FakeEps()
+    monkeypatch.setattr('src.services.eps_client._http_get', eps)
     from src.models.affiliation import Affiliation
     from src.models.organisation import Organisation
     from src.models.patient import Patient
@@ -173,8 +225,10 @@ def world(events):
         w = {
             'app': app, 'unit_a': unit_a.guid, 'unit_b': unit_b.guid,
             'pat': pat.guid, 'pro_a': pro_a.guid, 'pro_b': pro_b.guid,
-            'su': su.guid, 'events': events,
+            'su': su.guid, 'events': events, 'eps': eps,
         }
+        eps.list_at(IPS_1, unit_a.guid)
+        eps.list_at(IPS_2, unit_a.guid)
         for name, u in (('pro_a', pro_a), ('pro_b', pro_b), ('su', su),
                         ('pat', pat), ('pending', pending)):
             w[name + '_h'] = {'Authorization': 'Bearer ' + issue_token(u.guid, SECRET, 1)}
@@ -225,6 +279,11 @@ def _enrol_totp(client):
 def _fresh_code(secret, steps_ahead=1):
     """A valid code that the replay guard has not seen (the next 30 s step)."""
     return pyotp.TOTP(secret).at(time.time() + 30 * steps_ahead)
+
+
+IPS_1 = '11111111-1111-4111-8111-111111111111'
+IPS_2 = '22222222-2222-4222-8222-222222222222'
+IPS_3 = '33333333-3333-4333-8333-333333333333'
 
 
 # =============================================================================
@@ -558,10 +617,6 @@ def test_logged_in_user_is_not_redirected_with_a_token_to_an_unlisted_url(world)
 # 6. Entrance 1 — invited by care
 # =============================================================================
 
-IPS_1 = '11111111-1111-4111-8111-111111111111'
-IPS_2 = '22222222-2222-4222-8222-222222222222'
-
-
 def _invite(world, headers, unit=None, ips=IPS_1):
     return world['app'].test_client().post(
         '/api/patient-links/invites', headers=headers,
@@ -839,3 +894,211 @@ def test_the_care_forms_refuse_a_patient_session(world):
     page = care.post('/patient-link/invite', data={'ips_patient_guid': IPS_1,
                                                    'care_unit_guid': world['unit_a']})
     assert page.status_code == 200 and b'/patient-invite/' in page.data
+
+
+# =============================================================================
+# 9. The eps check: the guid must exist and be listed at the unit
+# =============================================================================
+# Three points take a patient guid: invite creation, link-code redemption, SU
+# relink. Each helper returns (response, "was anything written?").
+
+def _n_invites(world):
+    from src.models.patient_link import PatientInvite
+    with world['app'].app_context():
+        s = get_session()
+        n = s.query(PatientInvite).count()
+        s.close()
+        return n
+
+
+def _linked_guid(world):
+    link = _blob(world['app'], world['pat_h']['Authorization'][7:])['patient_link']
+    return link['ips_patient_guid'] if link else None
+
+
+def _err(r):
+    """(status, error code). `.get`, so a wrongly successful answer fails the
+    comparison instead of raising."""
+    return r.status_code, (r.get_json() or {}).get('error')
+
+
+def _refusals(world, code):
+    return [e for e in world['events']
+            if e['event'] == 'patient_link_refused' and e['detail'].get('reason') == code]
+
+
+def test_the_eps_call_is_the_documented_one(world):
+    assert _invite(world, world['pro_a_h']).status_code == 201
+    (call,) = world['eps'].calls
+    assert call['url'] == f'http://eps.test/api/v1/patients/{IPS_1}/clinics'
+    # eps reads ONLY the Authorization header.
+    assert call['headers'].get('Authorization') == 'ApiKey eps-test-key'
+    assert 'X-API-Key' not in call['headers']
+
+
+# (fake-eps mode or setup, expected error code, expected status)
+EPS_REFUSALS = [
+    ('down', 'eps_unavailable', 503),
+    ('timeout', 'eps_unavailable', 503),
+    (401, 'eps_unavailable', 503),
+    (403, 'eps_unavailable', 503),
+    (500, 'eps_unavailable', 503),
+    (302, 'eps_unavailable', 503),
+    ('foreign404', 'eps_unavailable', 503),
+    ('html404', 'eps_unavailable', 503),
+    ('garbage200', 'eps_unavailable', 503),
+    ('unknown', 'patient_not_found', 404),
+    ('other_unit', 'patient_not_at_unit', 409),
+]
+
+
+def _arrange(world, how):
+    eps = world['eps']
+    if how == 'unknown':
+        eps.patients.pop(IPS_1)
+    elif how == 'other_unit':
+        eps.list_at(IPS_1, world['unit_b'])
+    else:
+        eps.mode = how
+
+
+@pytest.mark.parametrize('how,code,status', EPS_REFUSALS)
+def test_invite_is_refused_and_nothing_is_written(world, how, code, status):
+    _arrange(world, how)
+    r = _invite(world, world['pro_a_h'])
+    assert _err(r) == (status, code)
+    assert _n_invites(world) == 0
+    assert len(_refusals(world, code)) == 1
+    assert _refusals(world, code)[0]['user_guid'] == world['pro_a']
+
+
+@pytest.mark.parametrize('how,code,status', EPS_REFUSALS)
+def test_redeem_is_refused_nothing_is_linked_and_the_code_survives(world, how, code, status):
+    link_code = _code(world)
+    _arrange(world, how)
+    r = _redeem(world, world['pro_a_h'], link_code)
+    assert _err(r) == (status, code)
+    assert _linked_guid(world) is None
+    assert len(_refusals(world, code)) == 1
+    # eps answers properly again: the same code still works.
+    world['eps'].mode = 'ok'
+    world['eps'].list_at(IPS_1, world['unit_a'])
+    assert _redeem(world, world['pro_a_h'], link_code).status_code == 200
+    assert _linked_guid(world) == IPS_1
+
+
+@pytest.mark.parametrize('how,code,status', EPS_REFUSALS)
+def test_su_relink_is_refused_and_the_link_is_unchanged(world, how, code, status):
+    from src.models.patient_link import PatientLinkHistory
+    assert _redeem(world, world['pro_a_h'], _code(world), IPS_2).status_code == 200
+    _arrange(world, how)
+    r = world['app'].test_client().put(
+        '/api/admin/patient-links/' + world['pat'], headers=world['su_h'],
+        json={'ips_patient_guid': IPS_1, 'reason': 'correction',
+              'care_unit_guid': world['unit_a']})
+    assert _err(r) == (status, code)
+    assert _linked_guid(world) == IPS_2
+    with world['app'].app_context():
+        s = get_session()
+        assert s.query(PatientLinkHistory).filter_by(event='relink').count() == 0
+        s.close()
+    assert len(_refusals(world, code)) == 1
+
+
+@pytest.mark.parametrize('missing', ['EPS_BASE_URL', 'EPS_API_KEY'])
+def test_eps_unset_refuses_by_name_and_calls_nothing(world, missing):
+    world['app'].config[missing] = ''
+    link_code = _code(world)
+    r = _invite(world, world['pro_a_h'])
+    assert _err(r) == (503, 'eps_not_configured')
+    r = _redeem(world, world['pro_a_h'], link_code)
+    assert _err(r) == (503, 'eps_not_configured')
+    r = world['app'].test_client().put(
+        '/api/admin/patient-links/' + world['pat'], headers=world['su_h'],
+        json={'ips_patient_guid': IPS_1, 'reason': 'x'})
+    assert _err(r) == (503, 'eps_not_configured')
+    assert _n_invites(world) == 0 and _linked_guid(world) is None
+    assert world['eps'].calls == []            # no default URL was tried
+
+
+def test_unit_is_matched_on_the_sso_organisation_guid_not_eps_clinic_guid(world):
+    """eps's clinic row has its own `guid`. Even when that value equals the
+    SSO unit guid, it is the wrong identifier space and must not match."""
+    eps = world['eps']
+    eps.list_at(IPS_1, world['unit_b'], clinic_guid=world['unit_a'])
+    r = _invite(world, world['pro_a_h'])
+    assert _err(r) == (409, 'patient_not_at_unit')
+
+
+def test_an_inactive_clinic_does_not_count(world):
+    world['eps'].list_at(IPS_1, world['unit_a'], active=False)
+    r = _invite(world, world['pro_a_h'])
+    assert _err(r) == (409, 'patient_not_at_unit')
+
+
+def test_outside_the_gate_eps_is_never_asked(world):
+    """Someone who may not link learns nothing from eps: the affiliation gate
+    answers first, identically whether the guid exists or not."""
+    link_code = _code(world)
+    known = _invite(world, world['pro_b_h'], ips=IPS_1)
+    unknown = _invite(world, world['pro_b_h'], ips=IPS_3)
+    assert known.status_code == unknown.status_code == 403
+    assert known.get_json() == unknown.get_json()
+    a = _redeem(world, world['pro_b_h'], link_code, IPS_1)
+    b = _redeem(world, world['pro_b_h'], link_code, IPS_3)
+    c = _redeem(world, world['pro_a_h'], 'ZZZZ-ZZZZ', IPS_3)        # no valid code
+    assert a.status_code == b.status_code == c.status_code == 404
+    assert a.get_json() == b.get_json() == c.get_json()
+    r = world['app'].test_client().put(
+        '/api/admin/patient-links/' + world['pat'], headers=world['pro_a_h'],
+        json={'ips_patient_guid': IPS_3, 'reason': 'x'})
+    assert r.status_code == 403
+    assert world['eps'].calls == []
+
+
+def test_su_relink_without_a_unit_needs_existence_only(world):
+    world['eps'].list_at(IPS_3, world['unit_b'])        # exists, elsewhere
+    url = '/api/admin/patient-links/' + world['pat']
+    api = world['app'].test_client()
+    r = api.put(url, headers=world['su_h'],
+                json={'ips_patient_guid': IPS_3, 'reason': 'x',
+                      'care_unit_guid': world['unit_a']})
+    assert _err(r) == (409, 'patient_not_at_unit')
+    assert _linked_guid(world) is None
+    r = api.put(url, headers=world['su_h'], json={'ips_patient_guid': IPS_3, 'reason': 'x'})
+    assert r.status_code == 200 and _linked_guid(world) == IPS_3
+
+
+def test_the_browser_forms_go_through_the_same_check(world):
+    world['eps'].patients.pop(IPS_1)
+    care = world['app'].test_client()
+    care.post('/login', data={'email': 'a@test.com', 'password': 'propass1234'})
+    r = care.post('/patient-link/invite', data={'ips_patient_guid': IPS_1,
+                                                'care_unit_guid': world['unit_a']})
+    assert r.status_code == 302 and _n_invites(world) == 0
+    link_code = _code(world)
+    care.post('/patient-link/redeem', data={'link_code': link_code, 'ips_patient_guid': IPS_1})
+    assert _linked_guid(world) is None
+
+
+def test_the_opt_out_cannot_be_on_outside_development(events):
+    with pytest.raises(RuntimeError, match='EPS_LINK_CHECK_DISABLED'):
+        _make_app(EPS_LINK_CHECK_DISABLED='true', FLASK_ENV='production')
+
+
+def test_the_opt_out_is_ignored_at_run_time_outside_development(world):
+    """Belt and braces: even if the flag reaches a running production config,
+    the check still runs."""
+    world['app'].config['EPS_LINK_CHECK_DISABLED'] = 'true'
+    world['eps'].patients.pop(IPS_1)
+    r = _invite(world, world['pro_a_h'])
+    assert _err(r) == (404, 'patient_not_found')
+
+
+def test_the_development_opt_out_skips_the_call_and_says_so(world):
+    app = world['app']
+    app.config.update(FLASK_ENV='development', EPS_LINK_CHECK_DISABLED='true',
+                      EPS_BASE_URL='', EPS_API_KEY='')
+    assert _invite(world, world['pro_a_h'], ips=IPS_3).status_code == 201
+    assert world['eps'].calls == []
+    assert any(e['event'] == 'patient_link_eps_check_skipped' for e in world['events'])

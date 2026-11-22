@@ -42,6 +42,9 @@ def create_app(config_override=None):
             WEBAUTHN_ORIGIN=cfg.WEBAUTHN_ORIGIN,
             WEBAUTHN_RP_NAME=cfg.WEBAUTHN_RP_NAME,
             PATIENTAPP_URL=cfg.PATIENTAPP_URL,
+            EPS_BASE_URL=cfg.EPS_BASE_URL,
+            EPS_API_KEY=cfg.EPS_API_KEY,
+            EPS_LINK_CHECK_DISABLED=cfg.EPS_LINK_CHECK_DISABLED,
             WTF_CSRF_ENABLED=True,
             WTF_CSRF_SSL_STRICT=False,
         )
@@ -49,6 +52,11 @@ def create_app(config_override=None):
     # Apply overrides (for testing)
     if config_override:
         app.config.update(config_override)
+
+    # #1040: the eps check on patient links has a development-only opt-out.
+    # Refuse to start with it on anywhere else, rather than run unchecked.
+    from src.services.eps_client import refuse_opt_out_outside_development
+    refuse_opt_out_outside_development(app.config)
 
     # Initialise database
     db_url = app.config.get('DATABASE_URL', '')

@@ -134,7 +134,9 @@ def su_relink(user_guid):
     try:
         link = pl.su_relink(get_db(), g.current_user, user_guid=user_guid,
                             ips_patient_guid=data.get('ips_patient_guid'),
-                            reason=data.get('reason'), ip=request.remote_addr)
+                            reason=data.get('reason'),
+                            care_unit_guid=data.get('care_unit_guid'),
+                            ip=request.remote_addr)
     except pl.LinkRefused as e:
         return _refused(e)
     return jsonify(_link_json(link)), 200

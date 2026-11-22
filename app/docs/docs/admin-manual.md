@@ -301,9 +301,18 @@ What only an SU can do:
 
 | task | how | note |
 |---|---|---|
-| Change which patient an account is linked to | `PUT /api/admin/patient-links/<user_guid>` with `ips_patient_guid` and `reason` | A wrong link shows one patient another patient's tasks. Check the eps patient guid twice |
+| Change which patient an account is linked to | `PUT /api/admin/patient-links/<user_guid>` with `ips_patient_guid`, `reason` and, preferably, `care_unit_guid` | The guid must exist in eps. Name the care unit and eps must also list the patient there; leave it out and only existence is checked — so name it |
 | Remove a link | `DELETE /api/admin/patient-links/<user_guid>` with `reason` | The patient app then answers `not_linked` |
 | Reset a lost second factor | `POST /api/admin/users/<user_guid>/second-factor/reset` | Removes all passkeys and the authenticator secret and logs the user out everywhere. **Verify the person's identity first**: after a reset the password alone is enough to add a new factor |
+
+**When linking is refused.** Every link is checked against eps.pdhc first.
+
+| the user sees | meaning | what to do |
+|---|---|---|
+| `patient_not_found` | eps has no patient with that guid | The guid is wrong. Copy it again from eps |
+| `patient_not_at_unit` | The patient exists but is not listed at that care unit in eps | Wrong patient, wrong unit, or the listing is missing in eps. Fix the listing in eps if the patient really belongs there |
+| `eps_unavailable` | eps did not answer, or refused SSO's key | Nothing was linked. Try again; if it persists, the operator checks eps and `EPS_API_KEY` |
+| `eps_not_configured` | `EPS_BASE_URL` / `EPS_API_KEY` are not set on SSO | Operator: see the Deployment Guide |
 
 There is no SU panel for these yet; use the API with your Bearer token. Every
 link, relink and unlink is kept in the `patient_link_history` table as well as

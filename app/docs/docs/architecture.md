@@ -435,12 +435,66 @@ until care has linked the account. Two entrances, one link step
 | no oracle | redeeming an unknown, used, expired code, or a valid code of another unit's patient, answers the same `404 link_code_not_found`; a failed attempt does not burn the code |
 | history | `patient_link_history` is append-only (link / relink / unlink, who, when, why). The audit FILE has 90-day retention; this does not |
 
-!!! warning "What SSO cannot check"
-    SSO has no client to eps.pdhc. It cannot verify that the patient guid
-    exists or that the patient is listed at that care unit. It verifies the
-    **professional** (affiliated to the unit they name) and records them. A
-    wrong guid would show one patient another patient's tasks, which is why a
-    unit cannot edit a link once made.
+#### The eps check (`services/eps_client.py`)
+
+A wrong guid would show one patient another patient's tasks, so the guid is
+checked against eps.pdhc at each of the three points where one enters: invite
+creation, link-code redemption, SU relink.
+
+```
+GET {EPS_BASE_URL}/api/v1/patients/<guid>/clinics
+Authorization: ApiKey <EPS_API_KEY>
+```
+
+The guid must exist in eps **and** the patient must be listed at the care unit
+the link is made for (the invite's unit; for a code, the unit the patient
+registered at). For an SU relink, existence is required and the unit check
+applies when the request names `care_unit_guid`.
+
+**Identifier spaces, verified in eps's model.** Each clinic eps returns has two
+guids: `guid` is eps's own clinic row id and is *not* an SSO identifier;
+`organisation_guid` — repeated as `care_unit_guid` — is "the sso organisation
+this clinic IS". SSO's care-unit guid is an `organisations.guid`, so it is
+compared with `care_unit_guid` and never with `guid`. A clinic in eps that has
+no `organisation_guid` can match no unit.
+
+**Fails closed, by name.** Nothing is written on any of these — no invite, no
+link, no history row — and a failed redemption does not burn the link code.
+
+| code | HTTP | when |
+|---|---|---|
+| `eps_not_configured` | 503 | `EPS_BASE_URL` or `EPS_API_KEY` unset. There is no default URL |
+| `eps_unavailable` | 503 | no answer, timeout, 401/403 (SSO's key is wrong), 3xx, 5xx, a 200 that is not a list, or a 404 that is not eps's own `{"error": "Patient not found"}` |
+| `patient_not_found` | 404 | eps's own 404 |
+| `patient_not_at_unit` | 409 | the patient exists, but no active clinic is that unit |
+
+A refusal or an outage is never read as "patient not found" and never as "ok".
+The 404 rule is deliberate: a hostname the reverse proxy does not know falls
+through to another service, which answers 404 for any path.
+
+**No leak outside the gate.** eps is asked only after the caller has passed the
+affiliation / SU gate (and, for a code, holds a valid code). Someone who may
+not link gets the same answer whether the guid exists or not, and eps is not
+called at all. Every refusal is audited as `patient_link_refused` with the
+real reason.
+
+**Development opt-out.** `EPS_LINK_CHECK_DISABLED=true` skips the call, only
+when `FLASK_ENV=development` — the switch that already relaxes the session
+cookie. `create_app` refuses to start with the flag set under any other
+`FLASK_ENV`, and the run-time check ignores it there as well. A skipped check
+is audited (`patient_link_eps_check_skipped`).
+
+!!! warning "What this check still cannot see"
+    - **Accepting an invite does not ask eps again.** The guid was checked when
+      the invite was created, up to seven days earlier.
+    - **eps's `/clinics` route does not filter ended assignments** (it joins
+      `patient_clinic_assignments` without `ended_at IS NULL`), so a patient
+      who has LEFT a unit still counts as listed there until eps is changed.
+    - **eps accepts the patient's FHIR `resource_id` as well as the platform
+      guid** on that route and does not echo which one it matched. A
+      `resource_id` entered by mistake passes the check and is stored; the
+      patient app then finds no tasks for it (it fails empty, not onto another
+      patient).
 
 This is not `models/invite.py`: that `Invite` is a GROUP-join token for
 professionals (and stores its token in clear). It was not reused.

@@ -44,6 +44,15 @@ class Config:
     # Where "go to the patient app" points. Empty = the link is not shown.
     PATIENTAPP_URL = os.environ.get('PATIENTAPP_URL', '')
 
+    # #1040: SSO asks eps.pdhc whether a patient guid exists and is listed at
+    # the care unit, before any patient link is written. NO default URL: unset
+    # reads as unset and linking refuses with `eps_not_configured`.
+    EPS_BASE_URL = os.environ.get('EPS_BASE_URL', '')
+    EPS_API_KEY = os.environ.get('EPS_API_KEY', '')
+    # Local development only. create_app refuses to start with this set
+    # unless FLASK_ENV=development.
+    EPS_LINK_CHECK_DISABLED = os.environ.get('EPS_LINK_CHECK_DISABLED', '')
+
     # Service credentials: collected as dict {client_id: secret}
     SERVICE_CREDENTIALS = {}
 
@@ -95,3 +104,6 @@ class TestConfig(Config):
     WEBAUTHN_RP_ID = ''
     WEBAUTHN_ORIGIN = ''
     PATIENTAPP_URL = ''
+    EPS_BASE_URL = ''
+    EPS_API_KEY = ''
+    EPS_LINK_CHECK_DISABLED = ''

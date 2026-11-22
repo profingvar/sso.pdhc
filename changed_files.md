@@ -582,3 +582,14 @@ Survey: sso_app is the only service with a FILE audit log; the rest keep audit i
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/api-reference.md, admin-manual.md, deployment-guide.md (operator steps), integration-guide.md, subservice-onboarding.md
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/sso.pdhc/changed_files.md, /Users/martiningvar/T7_sidewinder/sso.pdhc/newtask.txt (NEW)
 - /Users/martiningvar/T7_sidewinder/plans/patient_app_contract.md — Deviations, `[sso]` lines (outside this repo, as the contract instructs)
+
+## 2026-11-22 — #1040: eps check on patient links
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/eps_client.py (NEW) — the one outbound call to eps; named refusals; dev opt-out guard
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/patient_link.py — _eps_check at invite, redeem, SU relink (after the gate); su_relink(care_unit_guid=)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/patient_access.py — relink passes care_unit_guid
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/config.py, /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/app.py — EPS_BASE_URL, EPS_API_KEY, EPS_LINK_CHECK_DISABLED; startup refusal
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/.env.example — the variable names, no values
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_patient_app_1040.py — fake eps, 44 more tests
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/architecture.md, api-reference.md, admin-manual.md, deployment-guide.md, user-guide.md
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/progress.md, changed_files.md, newtask.txt
+- /Users/martiningvar/T7_sidewinder/plans/patient_app_contract.md — two more `[sso]` deviation lines

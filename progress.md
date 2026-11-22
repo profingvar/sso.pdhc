@@ -1040,9 +1040,40 @@ Built against `~/T7_sidewinder/plans/patient_app_contract.md` s1. LOCAL ONLY: no
 
 ### Known gaps, not fixed
 - `/login` (the HTML form) has no rate limit and there is no account lockout on wrong PASSWORDS (the JSON `/api/auth/login` has 20/min). TOTP has its own lockout; the password step does not.
-- SSO cannot check that an eps patient guid exists or is listed at the unit (no eps client here). The professional is the control.
+- ~~SSO cannot check that an eps patient guid exists or is listed at the unit.~~ Closed by the eps check, next section.
 - An account with no factor enrols one with the password alone (trust on first use); an SU reset re-opens that.
 - No recovery codes: a lost device is an SU reset.
 - TOTP enrolment shows the key as text and an `otpauth://` link, no QR code.
 - No SU panel for relink / unlink / reset: API only.
 - Deleting a user (`DELETE /api/admin/users/<guid>`) relies on the database's `ON DELETE CASCADE` for the new tables; not exercised on Postgres.
+
+## 2026-11-22 — #1040: the eps check on patient links (operator decision, on top of 98e3cf9)
+
+The risk named above — a wrong eps guid at linking shows one patient another patient's tasks — is now checked. LOCAL ONLY, not deployed.
+
+### What exists now
+- `app/src/services/eps_client.py`: one call, `GET {EPS_BASE_URL}/api/v1/patients/<guid>/clinics` with `Authorization: ApiKey <EPS_API_KEY>`. No default URL.
+- Called at the three points a guid enters: invite creation, link-code redemption, SU relink (`PUT /api/admin/patient-links/<user_guid>` now takes an optional `care_unit_guid`; existence always, unit when named). The guid must exist in eps and the patient must be listed at the unit.
+- Fails closed, by name; nothing is written and a link code is not burned: `eps_not_configured` 503, `eps_unavailable` 503 (no answer, timeout, 401/403, 3xx, 5xx, a 200 that is not a list, a 404 that is not eps's own), `patient_not_found` 404, `patient_not_at_unit` 409. Audited as `patient_link_refused` with the reason.
+- eps is asked only AFTER the affiliation / SU gate (and, for a code, a valid code), so nobody outside the gate learns whether a guid exists; a test asserts eps receives no call at all in those cases.
+- Dev opt-out `EPS_LINK_CHECK_DISABLED`, honoured only under `FLASK_ENV=development` (the repo's existing dev switch); `create_app` refuses to start with it otherwise, and the run-time check ignores it too.
+
+### Identifier spaces — verified, not assumed
+Read in `ips.pdhc/gateway/app/models/clinic.py`: a clinic has its own `guid` (eps's row id, NOT an SSO identifier) and `organisation_guid`, documented there as "the sso organisation this clinic IS" and repeated by `to_dict()` as `care_unit_guid`. SSO's care-unit guid is `organisations.guid`. So the two are the same space through that field, and SSO compares with `care_unit_guid`/`organisation_guid`, never with `guid`. A test lists a patient at a clinic whose own `guid` equals the SSO unit guid and expects a refusal. Not verified against DATA: I did not look at production rows, so whether every production clinic has `organisation_guid` filled is unknown (one without it matches no unit, i.e. refuses).
+
+### Which eps gate applies
+`@require_auth` only (`ips.pdhc/gateway/app/services/auth_service.py`). Its `ApiKey` branch admits any key that is active, not revoked and not expired; a key with no user becomes a transient service-account user; no scope is consulted on this route (`require_scope` is not applied). So a plain key with no scopes is admitted and eps needs NO change for the check to work.
+
+### Two things in eps the check cannot see (eps not edited; reported to the coordinator)
+1. `GET /api/v1/patients/<guid>/clinics` joins `patient_clinic_assignments` without the `ended_at IS NULL` filter (`active_only()`), so a patient who has left a unit still counts as listed. "Active assignment" is therefore only as good as that route.
+2. The route also resolves a FHIR `resource_id` and does not echo the platform guid, so SSO cannot tell which identifier it was given. A `resource_id` would pass and be stored; patientapp would then find no tasks (fails empty).
+
+### Tests
+- `app/tests/test_patient_app_1040.py`: 32 → 76 tests. Only `eps_client._http_get` is patched (a fake eps returning eps's own response shapes); the earlier 32 now run through the real check too.
+- Suite: 505 before → **549 passed** after, 0 failed.
+- Controls: 20 new single-point reverts, all failing on an assertion (one is `DID NOT RAISE` from `pytest.raises`). First run, 11 of the 20 failed on a `KeyError` instead: the tests indexed `['error']` on a body that, with the check removed, was a success. The tests were changed to compare `(status, .get('error'))` and all 20 then failed on the comparison. The earlier 42 controls were re-run afterwards: all 42 still fail on an assertion.
+
+### Not verified
+- No call was made to a real eps. The response shapes and the 404 body are read from the eps source in the local `ips.pdhc` checkout, which I did not compare with what is deployed.
+- That `https://eps.pdhc.se` is the right production `EPS_BASE_URL` (taken from the workspace handbook's rename note).
+- Accepting an invite does not re-ask eps (the guid was checked at invite creation, up to 7 days earlier). Deliberate; say if it should.

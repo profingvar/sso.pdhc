@@ -5,6 +5,8 @@ Before it can run in production (operator, see app/docs/docs/deployment-guide.md
   1. sso .env: SSO_CLIENT_ID_PATIENTAPP / SSO_CLIENT_SECRET_PATIENTAPP,
      patientapp's origin in ALLOWED_ORIGINS, WEBAUTHN_RP_ID, WEBAUTHN_ORIGIN,
      PATIENTAPP_URL. Same pair in patientapp.pdhc's .env.
+     Also EPS_BASE_URL and EPS_API_KEY: mint a key in eps for sso first (no
+     scope, no user). Without them every patient link is refused.
   2. Rebuild the image (new dependencies), pg_dump, run scripts/init_db.py.
 
 Next to verify, in this order:

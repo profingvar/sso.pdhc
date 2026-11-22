@@ -157,6 +157,18 @@ are written in this document.
 | `WEBAUTHN_ORIGIN` | `https://sso.pdhc.se` | the origin a passkey answer must come from |
 | `WEBAUTHN_RP_NAME` | optional, defaults to `PDHC` | shown by the device when saving a passkey |
 | `PATIENTAPP_URL` | `https://patientapp.pdhc.se` | the "go to the patient app" link; empty hides it |
+| `EPS_BASE_URL` | `https://eps.pdhc.se` | where SSO asks whether a patient guid exists and is listed at the care unit. No default: unset, every link is refused with `eps_not_configured` |
+| `EPS_API_KEY` | a key minted **in eps** for sso (see below) | sent as `Authorization: ApiKey <key>` |
+
+**Mint the eps key first.** In eps.pdhc, create an API key labelled for
+sso.pdhc. It needs **no scope and no user**: the one route SSO calls
+(`GET /api/v1/patients/<guid>/clinics`) is gated by eps's `require_auth`
+alone, which admits any active, unexpired, unrevoked key. Give it no scopes,
+so it opens none of eps's scoped routes. The key value goes into
+`EPS_API_KEY` and nowhere else.
+
+`EPS_LINK_CHECK_DISABLED` must **not** be set on the server: sso refuses to
+start with it unless `FLASK_ENV=development`.
 
 **In patientapp.pdhc's `.env`**: `SSO_CLIENT_ID` and `SSO_CLIENT_SECRET` with
 the same two values as the pair above.
@@ -174,6 +186,10 @@ Then:
       pair answers 200, and the same call with a wrong secret answers 403. A
       junk Bearer answers 401 before the pair is looked at, so it proves
       nothing about the pair.
+    - eps: as a professional, create an invite for a synthetic patient listed
+      at your unit (expect the link), then for a made-up guid (expect
+      `patient_not_found`). `eps_unavailable` on both means the key or the URL
+      is wrong: eps answered 401/403 or did not answer.
     - Passkeys: log in as a synthetic patient and add a passkey at
       `/second-factor`. If the page says passkeys are not switched on, the two
       `WEBAUTHN_*` variables did not reach the container.
@@ -279,6 +295,7 @@ After deploying to a new environment:
 - [ ] Spot-check a downstream `/me/service` call returns `must_change_password` and `effective_phases` fields in the blob
 - [ ] `effective_phases` sourced only from `UserPhase` (#57) — verified via `scripts/phases_migration_report.py`, with SU having explicitly granted phases to every user who should retain access after the cutover
 - [ ] Schema includes the six #1040 tables (`webauthn_credentials`, `totp_secrets`, `patient_links`, `patient_link_history`, `patient_invites`, `patient_link_codes`) — created by `init_db.py`
+- [ ] `EPS_BASE_URL` / `EPS_API_KEY` set; an invite for a made-up patient guid answers `patient_not_found`, not `eps_unavailable` (#1040)
 - [ ] `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` set; a patient can add a passkey at `/second-factor` (#1040)
 - [ ] Access-request approval on this deployment no longer auto-creates `UserPhase` rows — confirm by test-approving a request and checking the response includes `requested_phases_pending_su_grant` (#57)
 
