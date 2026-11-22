@@ -101,8 +101,8 @@ class SoftAuthenticator:
 # --- a fake eps: the ONLY thing patched is the outbound HTTP call -------------
 
 class _Resp:
-    def __init__(self, status, body):
-        self.status_code, self._body = status, body
+    def __init__(self, status, body, headers=None):
+        self.status_code, self._body, self.headers = status, body, headers or {}
 
     def json(self):
         if isinstance(self._body, str):
@@ -117,6 +117,7 @@ class FakeEps:
 
     def __init__(self):
         self.patients, self.mode, self.calls = {}, 'ok', []
+        self.canonical = {}     # identifier asked for -> platform guid eps names
 
     def list_at(self, patient, *units, active=True, clinic_guid=None):
         self.patients[patient] = [
@@ -141,7 +142,8 @@ class FakeEps:
         guid = url.rsplit('/patients/', 1)[1].split('/')[0]
         if guid not in self.patients:
             return _Resp(404, {'error': 'Patient not found'})
-        return _Resp(200, self.patients[guid])
+        return _Resp(200, self.patients[guid],
+                     {'X-PDHC-Patient-Guid': self.canonical.get(guid, guid)})
 
 
 # --- fixtures ----------------------------------------------------------------
@@ -1102,3 +1104,19 @@ def test_the_development_opt_out_skips_the_call_and_says_so(world):
     assert _invite(world, world['pro_a_h'], ips=IPS_3).status_code == 201
     assert world['eps'].calls == []
     assert any(e['event'] == 'patient_link_eps_check_skipped' for e in world['events'])
+
+
+def test_an_identifier_that_is_not_the_platform_guid_is_refused(monkeypatch):
+    """eps resolves a FHIR resource_id too and names the platform guid it
+    found; sso must not store the resource_id as the patient link."""
+    from src.services import eps_client
+    eps = FakeEps()
+    unit, resource_id, platform = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+    eps.list_at(resource_id, unit); eps.canonical[resource_id] = platform
+    eps.list_at(platform, unit)
+    monkeypatch.setattr('src.services.eps_client._http_get', eps)
+    cfg = {'EPS_BASE_URL': 'https://eps.example', 'EPS_API_KEY': 'k'}
+    assert eps_client.verify_patient(cfg, platform, unit) == 'checked'
+    with pytest.raises(eps_client.EpsRefusal) as e:
+        eps_client.verify_patient(cfg, resource_id, unit)
+    assert e.value.code == eps_client.PATIENT_NOT_FOUND

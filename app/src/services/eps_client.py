@@ -119,6 +119,13 @@ def verify_patient(config, ips_patient_guid, care_unit_guid=None):
     clinics = body()
     if not isinstance(clinics, list):
         raise EpsRefusal(UNAVAILABLE, 'unexpected body')
+    # eps's route also resolves a FHIR resource_id, and names the platform
+    # guid it resolved to in a header. What sso stores must BE the platform
+    # guid (it is what orders and CDR rows carry), so anything else is refused
+    # rather than stored. An eps too old to send the header is not refused.
+    canonical = (getattr(resp, 'headers', None) or {}).get('X-PDHC-Patient-Guid')
+    if canonical and str(canonical).strip().lower() != str(ips_patient_guid).strip().lower():
+        raise EpsRefusal(PATIENT_NOT_FOUND, 'identifier is not the platform guid')
     if care_unit_guid:
         wanted = str(care_unit_guid).strip().lower()
         for c in clinics:
