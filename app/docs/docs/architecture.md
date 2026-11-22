@@ -319,8 +319,8 @@ Alembic.
 | `patient_profiles` | #1049: one row per self-registered patient: `user_guid` (unique), `given_name`, `family_name` (for the blob's `display_name`). The mobile number is NOT stored in SSO; it goes to eps |
 | `patient_invite_details` | #1050: one row per invite made with a name: `invite_guid` (unique, FK `patient_invites.guid`), `given_name`, `family_name`, `pnr_failures`. A new table, not columns, so `init_db.py` (create_all) is the whole migration |
 
-`patient_links.care_unit_guid` existed from #1040 (invite unit, link-code unit);
-#1049 exposes it in the blob and sets it at self-registration. Rows written
+`patient_links.care_unit_guid` existed from #1040 (invite unit, link-code unit).
+Since #1049 it is in the blob, and it is set at self-registration. Rows written
 before carry the unit they were made for, or null (SU relink without a unit).
 
 ## Authentication Flow
