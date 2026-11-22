@@ -33,6 +33,17 @@ class Config:
     # Health check polling interval (seconds) — 300 = 5 min for dev, increase later
     HEALTH_CHECK_INTERVAL = int(os.environ.get('HEALTH_CHECK_INTERVAL', '1800'))
 
+    # #1040 passkeys (WebAuthn). The site a passkey is bound to. NO fallback:
+    # unset means passkeys answer `passkey_not_configured` and TOTP still
+    # works. Production: WEBAUTHN_RP_ID=sso.pdhc.se,
+    # WEBAUTHN_ORIGIN=https://sso.pdhc.se. Changing the RP ID orphans every
+    # passkey already registered.
+    WEBAUTHN_RP_ID = os.environ.get('WEBAUTHN_RP_ID', '')
+    WEBAUTHN_ORIGIN = os.environ.get('WEBAUTHN_ORIGIN', '')
+    WEBAUTHN_RP_NAME = os.environ.get('WEBAUTHN_RP_NAME', 'PDHC')
+    # Where "go to the patient app" points. Empty = the link is not shown.
+    PATIENTAPP_URL = os.environ.get('PATIENTAPP_URL', '')
+
     # Service credentials: collected as dict {client_id: secret}
     SERVICE_CREDENTIALS = {}
 
@@ -81,3 +92,6 @@ class TestConfig(Config):
     ALLOWED_CALLBACK_URLS = ['http://localhost:9000/callback']
     SERVICE_CREDENTIALS = {'test-client-id': 'test-client-secret'}
     LOG_DIR = '/tmp/sso_test_logs'
+    WEBAUTHN_RP_ID = ''
+    WEBAUTHN_ORIGIN = ''
+    PATIENTAPP_URL = ''

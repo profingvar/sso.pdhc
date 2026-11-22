@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Patient invite — sso.pdhc{% endblock %}
+{% block content %}
+<div style="max-width: 640px; margin: 2rem auto;">
+    <div class="card">
+        <h2>Patient invite created</h2>
+        <p>Give this link to the patient. It is shown <strong>only now</strong>, works once and
+            expires {{ expires_at.strftime('%Y-%m-%d %H:%M') }} UTC.</p>
+        <p><code style="word-break:break-all;">{{ invite_url }}</code></p>
+        <p class="text-muted">Patient (eps/ips guid): <code>{{ ips_patient_guid }}</code>.
+            The account the patient creates with this link is linked to that patient.</p>
+        <p><a href="/dashboard">Back to dashboard</a></p>
+    </div>
+</div>
+{% endblock %}

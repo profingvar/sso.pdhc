@@ -301,6 +301,21 @@ External partners deliberately share the `Organisation` table so that
 `Contract.signer.party.reference = Organization/<guid>` works uniformly across
 internal payers and external providers (#96).
 
+### Patient-app tables (#1040)
+
+All NEW tables; no existing table was altered. Created by
+`scripts/init_db.py` (`create_all`, additive, idempotent). This repo has no
+Alembic.
+
+| table | holds |
+|---|---|
+| `webauthn_credentials` | one row per passkey: `credential_id` (unique), public key, `sign_count`, name |
+| `totp_secrets` | at most one per user: `secret_enc`, `confirmed_at` (NULL = not enrolled), `last_used_step`, `failed_attempts`, `locked_until` |
+| `patient_links` | the current link: `user_guid` (unique), `ips_patient_guid` (unique), `care_unit_guid`, `linked_by_user_guid`, `linked_at`, `method` |
+| `patient_link_history` | append-only: `event`, account, patient, previous patient, actor, method, reason, `at` |
+| `patient_invites` | `token_hash`, `ips_patient_guid`, `care_unit_guid`, creator, `expires_at`, `used_at`, `revoked_at` |
+| `patient_link_codes` | `user_guid`, `code_hash`, `expires_at`, `used_at`, `used_by_user_guid` |
+
 ## Authentication Flow
 
 ### Standard Login
@@ -322,6 +337,113 @@ sequenceDiagram
     S->>DB: build_access_blob(user, session, session_id=sid)
     S-->>C: Access blob
 ```
+
+### Patient login: password, then a second factor (#1040)
+
+A `patient` account has a second factor: a **passkey** (WebAuthn, via the
+`webauthn` library) first, **TOTP** (via `pyotp`) as reserve. Professionals are
+unchanged in this stage.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as SSO Service
+    B->>S: POST /login (email, password [, next, state])
+    alt a factor is enrolled
+        S-->>B: 302 /login/second-factor — NO token; session holds sf_pending
+        B->>S: passkey assertion  or  TOTP code
+        S->>S: issue_token(..., second_factor={method, verified_at})
+    else nothing enrolled yet
+        S->>S: issue_token(...) — no claim
+        S-->>B: 302 /second-factor (enrol)
+        B->>S: register passkey  or  confirm TOTP
+        S->>S: re-issue the session token WITH the claim
+    end
+    S-->>B: 302 to the service callback (allow-listed) or /dashboard
+```
+
+**`verified` is a property of the token, not of the account.** The claim pair
+`sfm` (method) / `sfa` (when, epoch seconds) is written only by
+`issue_token(..., second_factor=...)`. `build_access_blob` reads it from the
+token that carried the request. So an enrolled account that obtains a token
+with the password alone — `POST /api/auth/login` still issues one — gets
+`second_factor.verified: false`. **This is a delegated control**, like
+`must_change_password`: SSO states the fact, the consumer refuses on it.
+patientapp.pdhc is the consumer that does.
+
+What SSO itself enforces:
+
+| rule | where |
+|---|---|
+| a patient's token reaches a service callback only when the session token is verified; an unverified session is sent to enrol / step up and resumes afterwards | `second_factor_ui.patient_handshake`, `begin_patient_login` |
+| the claim is carried from the session token onto the token minted for a service | `patient_handshake` |
+| adding or removing a factor on an enrolled account needs a verified session | `_may_change_factors`, `remove_factor` |
+| the last factor cannot be removed by the user | `second_factor.remove_factor` |
+| a passkey assertion is matched to a credential of THIS user | `finish_authentication` |
+| a WebAuthn challenge is consumed before it is checked (one attempt) | `login_passkey_verify`, `enrol_passkey_verify` |
+| TOTP: a code works once (the 30 s step is remembered); 5 wrong codes lock TOTP for 15 minutes | `second_factor._check_code` |
+| lost device: SU reset removes every factor and ends all sessions | `POST /api/admin/users/<guid>/second-factor/reset` |
+
+**Trust on first use, stated.** An account with no factor enrols one with its
+password alone. For an invited account the one-time invite link is what binds
+the person; for a self-registered one, the link code handed to the care unit
+is. The SU reset re-opens that window, so it is the one operation where the SU
+must have checked who is asking.
+
+**Configuration.** Passkeys are bound to one site: `WEBAUTHN_RP_ID` and
+`WEBAUTHN_ORIGIN` (production `sso.pdhc.se` / `https://sso.pdhc.se`). There is
+no fallback; unset, the passkey endpoints answer `503 passkey_not_configured`
+and TOTP still works. Deriving the site from the request's Host header was
+rejected: whoever controls that header would choose what a credential is
+verified against. Changing the RP ID orphans every registered passkey.
+
+**Secrets at rest** (`services/secret_store.py`):
+
+| what | how | why |
+|---|---|---|
+| passkey | only the PUBLIC key is stored | the private key never leaves the device |
+| TOTP shared secret | Fernet-encrypted | cannot be hashed: the server computes the code from it. First encryption-at-rest in this repo |
+| patient-invite token (256 bits) | keyed hash (HMAC-SHA256) | shown once, never stored |
+| link code (8 characters, about 39 bits) | keyed hash (HMAC-SHA256) | a plain hash of so short a value could be searched offline from a database dump; keyed, a dump alone is not enough |
+
+Both keys are derived from `SECRET_KEY` (HKDF, one label per purpose), so
+there is no new `.env` variable. **Rotating `SECRET_KEY` therefore makes
+enrolled TOTP secrets unreadable** (those patients enrol again; passkeys are
+unaffected) and voids outstanding invites and link codes.
+
+### Patient link: which patient an account is (#1040)
+
+`patient_link` in the blob names the patient GUID from eps.pdhc (formerly
+ips.pdhc) — the `patient_guid` on ServiceRequests and CDR rows. It is `null`
+until care has linked the account. Two entrances, one link step
+(`services/patient_link._set_link`):
+
+1. **Invited by care.** A professional creates a *patient invite* naming the
+   eps patient guid and a care unit. The patient opens the one-time link
+   (`/patient-invite/<token>`, 7 days), enters email, personnummer and a
+   password; the account is created already linked.
+2. **Self-registered.** The patient registers (`/register-patient`), logs in,
+   and asks for a **link code** (`ABCD-EFGH`, one-time, 7 days, only the newest
+   works). The patient gives it to the care unit; a professional there enters
+   the code together with the eps patient guid.
+
+| rule | detail |
+|---|---|
+| who may link | an **activated** professional with an **active affiliation** to the care unit (the invite's unit; for a code, the unit the patient registered at), or an SU admin. A professional with `must_change_password` is refused |
+| one account ↔ one patient | both directions, by unique constraints on `patient_links` and by check |
+| relink / unlink | SU admin only, with a reason |
+| no oracle | redeeming an unknown, used, expired code, or a valid code of another unit's patient, answers the same `404 link_code_not_found`; a failed attempt does not burn the code |
+| history | `patient_link_history` is append-only (link / relink / unlink, who, when, why). The audit FILE has 90-day retention; this does not |
+
+!!! warning "What SSO cannot check"
+    SSO has no client to eps.pdhc. It cannot verify that the patient guid
+    exists or that the patient is listed at that care unit. It verifies the
+    **professional** (affiliated to the unit they name) and records them. A
+    wrong guid would show one patient another patient's tasks, which is why a
+    unit cannot edit a link once made.
+
+This is not `models/invite.py`: that `Invite` is a GROUP-join token for
+professionals (and stores its token in clear). It was not reused.
 
 ### SSO Handshake (H1–H4)
 
@@ -445,9 +567,33 @@ Downstream services use it to make authorization decisions.
   "organisation_guid": "i9j0k1l2-...",
   "in_registry": true,
   "registries": ["INCA"],
-  "fhir_resource_type": "Patient"
+  "fhir_resource_type": "Patient",
+  "patient_link": {
+    "ips_patient_guid": "<eps patient guid>",
+    "linked_at": "2026-11-22T09:15:00+00:00",
+    "linked_by": "<user guid of the professional or SU>"
+  },
+  "second_factor": {
+    "enrolled": true,
+    "verified": true,
+    "method": "passkey",
+    "verified_at": "2026-11-22T09:20:11+00:00"
+  }
 }
 ```
+
+| Field | Meaning (#1040) |
+|-------|---------|
+| `patient_link` | `null` until care has linked the account to a patient. Always present for a patient |
+| `second_factor.enrolled` | The ACCOUNT has at least one passkey or a confirmed TOTP secret |
+| `second_factor.verified` | THIS token was issued after a second factor was presented. `false` for a password-only token, even on an enrolled account |
+| `second_factor.method` | `"passkey"` or `"totp"` when verified, else `null` |
+| `second_factor.verified_at` | ISO-8601 UTC when verified, else `null` |
+
+A consumer that serves patient data requires **all** of: `user_type ==
+"patient"`, `second_factor.verified`, `must_change_password` false, and
+`patient_link.ips_patient_guid` present. SSO does not enforce this for the
+consumer. `patient_guid` (SSO's own Patient row) is NOT the eps patient guid.
 
 ### Professional Access Blob (current / reform)
 
@@ -636,6 +782,8 @@ flowchart TD
 |-----------|--------|---------|
 | `auth` | `/api/auth` | `login`, `me`, `me/service`, `logout`, `change-password` |
 | `patient` | `/api/patient` | Patient self-service |
+| `patient_access` | `/api` | #1040, Bearer: `POST /patient/link-code`; `POST /patient-links/invites`, `DELETE /patient-links/invites/<guid>`, `POST /patient-links/redeem`; SU `PUT`/`DELETE /admin/patient-links/<user_guid>`, `POST /admin/users/<guid>/second-factor/reset`; `GET /auth/second-factor` |
+| `second_factor_ui` | — | #1040, session cookie + CSRF: `/login/second-factor[/passkey/options|/passkey/verify|/totp]`, `/second-factor[/passkey/options|/passkey/verify|/totp/start|/totp/confirm|/remove]`, `/patient-invite/<token>`, `/patient-link/code|invite|redeem` |
 | `groups` | `/api/groups` | Membership / admin / invite flows |
 | `admin` | `/api/admin` | SU administration (see below) |
 | `registry` | `/api/registry` | Roles, research-projects, care-organisations, care-units |

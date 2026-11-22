@@ -291,6 +291,26 @@ authenticated professional; writes are **SU-only**.
 
 ---
 
+### Patient app: links and second factor (#1040)
+
+**Linking is done by care, not by the SU.** A professional affiliated to the
+patient's care unit invites the patient or redeems the patient's link code,
+from their own Dashboard. As SU you can do the same for any care unit.
+
+What only an SU can do:
+
+| task | how | note |
+|---|---|---|
+| Change which patient an account is linked to | `PUT /api/admin/patient-links/<user_guid>` with `ips_patient_guid` and `reason` | A wrong link shows one patient another patient's tasks. Check the eps patient guid twice |
+| Remove a link | `DELETE /api/admin/patient-links/<user_guid>` with `reason` | The patient app then answers `not_linked` |
+| Reset a lost second factor | `POST /api/admin/users/<user_guid>/second-factor/reset` | Removes all passkeys and the authenticator secret and logs the user out everywhere. **Verify the person's identity first**: after a reset the password alone is enough to add a new factor |
+
+There is no SU panel for these yet; use the API with your Bearer token. Every
+link, relink and unlink is kept in the `patient_link_history` table as well as
+in the audit log.
+
+---
+
 ### External Partners
 
 Third-party callers licensed to talk to PDHC are managed in the **External
@@ -540,5 +560,11 @@ All admin actions are logged to structured audit files in `LOG_DIR`:
 - Direct phase grants and revocations (#46)
 - Affiliation create/delete, user activate/deactivate (S9, #411)
 - External partner register / rotate / suspend / reactivate / revoke
+- Patient app (#1040): `patient_invite_create` / `_revoke` / `_accept` / `_refused`,
+  `patient_link_code_create`, `patient_link` (who, which account, which patient,
+  method), `patient_link_refused` (with the real reason, which the caller is not
+  told), `patient_relink`, `patient_unlink`, `second_factor_enrol` / `_remove` /
+  `_fail` / `_reset`, and `login_password_ok` (password accepted, second factor
+  still owed) before `login_success` (which names the method)
 
 Logs include: timestamp, action type, actor GUID, target GUID, IP address, and action-specific details.

@@ -116,7 +116,8 @@ def me():
     session = get_db()
     user = g.current_user
     sid = (g.token_payload or {}).get('sid')
-    blob = build_access_blob(user, session, session_id=sid)
+    blob = build_access_blob(user, session, session_id=sid,
+                             token_payload=g.token_payload)
     return jsonify(blob), 200
 
 
@@ -144,7 +145,8 @@ def me_service():
     session = get_db()
     user = g.current_user
     sid = (g.token_payload or {}).get('sid')
-    blob = build_access_blob(user, session, session_id=sid)
+    blob = build_access_blob(user, session, session_id=sid,
+                             token_payload=g.token_payload)
 
     audit('service_auth_success', user_guid=user.guid,
           detail={'client_id': client_id}, ip=request.remote_addr)

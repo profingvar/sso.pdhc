@@ -21,9 +21,16 @@ from src.models.affiliation import Affiliation
 from src.models.employment import Employment
 # 2026-11-19: time-limited external read grants on CDR data.
 from src.models.read_grant import ReadGrant
+# #1040: second factor for patient accounts, and the account <-> patient link.
+from src.models.second_factor import WebAuthnCredential, TotpSecret
+from src.models.patient_link import (
+    PatientLink, PatientLinkHistory, PatientInvite, PatientLinkCode,
+)
 
 __all__ = [
     'ReadGrant',
+    'WebAuthnCredential', 'TotpSecret',
+    'PatientLink', 'PatientLinkHistory', 'PatientInvite', 'PatientLinkCode',
     'User', 'Patient', 'Professional', 'Organisation', 'OrganisationAudit',
     'UserOrganisation', 'Group', 'Membership', 'GroupProposal',
     'LeaderRequest', 'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',

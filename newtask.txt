@@ -1,0 +1,16 @@
+Current focus (2026-11-22): #1040, patient app stage 1 — built locally, NOT deployed.
+
+Before it can run in production (operator, see app/docs/docs/deployment-guide.md
+"Patient app (#1040)"):
+  1. sso .env: SSO_CLIENT_ID_PATIENTAPP / SSO_CLIENT_SECRET_PATIENTAPP,
+     patientapp's origin in ALLOWED_ORIGINS, WEBAUTHN_RP_ID, WEBAUTHN_ORIGIN,
+     PATIENTAPP_URL. Same pair in patientapp.pdhc's .env.
+  2. Rebuild the image (new dependencies), pg_dump, run scripts/init_db.py.
+
+Next to verify, in this order:
+  1. The passkey JavaScript in a real browser (iPhone, iPad, Mac). It has never
+     run; only the server side is tested.
+  2. init_db.py against Postgres (six new tables).
+  3. Rate limit / lockout on the password step of /login.
+
+State and test results: progress.md, last section.

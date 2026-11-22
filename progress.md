@@ -1009,3 +1009,40 @@ want fixing together.
 - New: `/admin/set-professional-role` (doctor/nurse/other label on the person), select in the Users table, audited.
 - Tests: test_s9_session_ui.py 7 — all through a session; 5 fail with the old middleware (mutation-checked). Suite 473 passed.
 - DEPLOYED 2026-11-19 as overlay image FROM the running image (rollback tag `sso-app:pre_s9sess`, files `*.pre_s9sess.<ts>` in /usr/local/www/sso.pdhc/app). Baseline 4/4, health 200, hashes ok; no-auth GET and PATCH 401, forged CSRF header without a session 401, junk Bearer 401, /login 200; siblings 200.
+
+## 2026-11-22 — #1040: second factor for patient accounts + patient link (patient app stage 1, epic #1039)
+
+Built against `~/T7_sidewinder/plans/patient_app_contract.md` s1. LOCAL ONLY: not deployed, no `.env` touched, the `_PATIENTAPP` pair not registered (operator steps: `app/docs/docs/deployment-guide.md`, "Patient app (#1040)").
+
+### What exists now
+- **Blob** (patients only, always present): `patient_link` = `{ips_patient_guid, linked_at, linked_by}` or `null`; `second_factor` = `{enrolled, verified, method, verified_at}`. `verified` is a claim in the TOKEN (`sfm`/`sfa`, written only by `issue_token(second_factor=...)`), so a password-only token on an enrolled account says `verified: false`.
+- **Second factor**: passkey (`webauthn==2.7.1`) first, TOTP (`pyotp==2.9.0`) as reserve. Login for a patient: password → `/login/second-factor` (NO token until the factor) → verified token. Not enrolled: token without the claim → `/second-factor` to enrol → session token re-issued with the claim. A patient token reaches a service callback only when verified.
+- **Patient link**, two entrances, one link step: (1) care creates a patient invite (one-time link, 7 days) and the account is created already linked; (2) a self-registered patient makes a link code (`ABCD-EFGH`, one-time, 7 days, newest only) and care redeems it with the eps patient guid. Who may link: activated professional with an active affiliation to the unit, or SU. One account ↔ one patient both ways. Relink / unlink SU only, with a reason.
+- **How patient accounts were created before**: `/register-patient` and `POST /api/patient/register`, both via `services/patient_enrolment.enrol_patient` (#910). Self-registration already existed and is unchanged; the invite path calls the same service. `models/invite.py` is a GROUP-join token and was NOT reused.
+- **Secrets at rest** (`services/secret_store.py`): passkey = public key only; TOTP secret Fernet-encrypted (it cannot be hashed; first encryption-at-rest in this repo); invite token and link code as keyed hash (HMAC-SHA256). Keys derived from `SECRET_KEY` by HKDF, so no new secret in `.env` — and rotating `SECRET_KEY` now forces TOTP re-enrolment and voids outstanding invites/codes.
+- **DB**: six NEW tables (`webauthn_credentials`, `totp_secrets`, `patient_links`, `patient_link_history`, `patient_invites`, `patient_link_codes`), created by `scripts/init_db.py` (`create_all`, additive). No existing table altered. **This repo has no Alembic**, so there is no revision id / head to report.
+- **Routes**: see `app/docs/docs/api-reference.md` "Patient app" and `architecture.md` endpoint map.
+
+### Found while here and fixed
+- `GET /login?next=<url>` for an already-logged-in user minted a token and redirected to ANY url — the allowlist was only on the POST branch. A link opened by a logged-in user handed a valid token to that address. Both branches now use the same allowlist. Test + control below.
+
+### Tests
+- New: `app/tests/test_patient_app_1040.py`, 32 tests, all through the real routes with auth on (password login at `/login`, real WebAuthn ceremony against a software authenticator verified by py_webauthn, blob read back through `/api/auth/me/service` with service credentials). `audit` is replaced by a recorder so no event reaches the audit FILE.
+- `app/tests/test_models.py`: table list +6.
+- Suite: **473 passed before** → **505 passed after** (473 + 32), 0 failed.
+- **Controls: 42 single-point reverts, each run on a copy of the tree, each made its test fail on an assertion** (none on an import or a crash). The first draft of one control ("verified follows the token") failed on a 500 instead; the mutation was wrong (it left a `None` to subscript), was rewritten, and then failed on the assertion. Two gates are layered so that one revert changes nothing, and were therefore reverted together and said so: SU-only relink (route decorator + service check) and the care form refusing a patient session (three layers).
+
+### Not verified
+- **The passkey JavaScript (`static/js/second_factor.js`) has never run in a browser.** The server side is exercised with real signed WebAuthn messages; the browser half (`navigator.credentials`, base64url conversion) is untested, on iPhone/iPad/Mac or anywhere.
+- The Docker image was not rebuilt. Wheels for `webauthn`, `pyotp`, `cryptography==50.0.2` and `cbor2` exist for linux/aarch64 py3.12 (checked by `pip download`), but the build itself was not run.
+- `init_db.py` was not run against Postgres; the tables were only created on SQLite by the tests. Unique constraints and `ON DELETE CASCADE` therefore have not been seen on Postgres.
+- `scripts/test_endpoints.sh` got five no-auth probes; the script was not run.
+
+### Known gaps, not fixed
+- `/login` (the HTML form) has no rate limit and there is no account lockout on wrong PASSWORDS (the JSON `/api/auth/login` has 20/min). TOTP has its own lockout; the password step does not.
+- SSO cannot check that an eps patient guid exists or is listed at the unit (no eps client here). The professional is the control.
+- An account with no factor enrols one with the password alone (trust on first use); an SU reset re-opens that.
+- No recovery codes: a lost device is an SU reset.
+- TOTP enrolment shows the key as text and an `otpauth://` link, no QR code.
+- No SU panel for relink / unlink / reset: API only.
+- Deleting a user (`DELETE /api/admin/users/<guid>`) relies on the database's `ON DELETE CASCADE` for the new tables; not exercised on Postgres.

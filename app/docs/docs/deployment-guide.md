@@ -140,6 +140,50 @@ KEY_CREATED_AT=2026-03-18
 LOG_DIR=/var/log/sso
 ```
 
+#### Patient app (#1040): what the operator sets
+
+Nothing here is done by a deploy script; all of it is operator-only. No values
+are written in this document.
+
+**In sso.pdhc's `.env`** (`shared/.env` on the server):
+
+| variable | set to | why |
+|---|---|---|
+| `SSO_CLIENT_ID_PATIENTAPP` | a new client id | the `_PATIENTAPP` pair patientapp.pdhc presents on `/api/auth/me/service` |
+| `SSO_CLIENT_SECRET_PATIENTAPP` | a new random secret | same pair. Both must be non-empty or the pair is not loaded |
+| `ALLOWED_ORIGINS` | append `https://patientapp.pdhc.se` | the handshake only redirects to listed origins |
+| `ALLOWED_CALLBACK_URLS` | optionally append patientapp's exact callback URL (take it from patientapp.pdhc's own docs) | exact-URL form of the same allowlist; the origin entry above is already sufficient |
+| `WEBAUTHN_RP_ID` | `sso.pdhc.se` | the site passkeys are bound to |
+| `WEBAUTHN_ORIGIN` | `https://sso.pdhc.se` | the origin a passkey answer must come from |
+| `WEBAUTHN_RP_NAME` | optional, defaults to `PDHC` | shown by the device when saving a passkey |
+| `PATIENTAPP_URL` | `https://patientapp.pdhc.se` | the "go to the patient app" link; empty hides it |
+
+**In patientapp.pdhc's `.env`**: `SSO_CLIENT_ID` and `SSO_CLIENT_SECRET` with
+the same two values as the pair above.
+
+Then:
+
+1. Rebuild the image (`docker-compose up -d --build`): `requirements.txt`
+   gained `webauthn`, `pyotp` and `cryptography`. A plain `docker restart`
+   neither installs them nor re-reads `.env`.
+2. Take a `pg_dump`, then run `python scripts/init_db.py` in the app
+   container. It creates the six new tables and touches nothing else.
+3. Check, in this order:
+    - `/api/health` answers 200.
+    - The pair: `GET /api/auth/me/service` with a **valid** Bearer and the new
+      pair answers 200, and the same call with a wrong secret answers 403. A
+      junk Bearer answers 401 before the pair is looked at, so it proves
+      nothing about the pair.
+    - Passkeys: log in as a synthetic patient and add a passkey at
+      `/second-factor`. If the page says passkeys are not switched on, the two
+      `WEBAUTHN_*` variables did not reach the container.
+
+!!! warning "Do not change these afterwards without knowing the cost"
+    - `WEBAUTHN_RP_ID`: changing it orphans every registered passkey.
+    - `SECRET_KEY`: rotating it makes enrolled authenticator-app secrets
+      unreadable (those patients enrol again; passkeys keep working) and voids
+      outstanding invites and link codes — in addition to logging everyone out.
+
 !!! warning
     Change `BOOTSTRAP_SU_PASSWORD` immediately after first login. Rotate `SECRET_KEY` if compromised — this invalidates all active JWTs.
 
@@ -234,6 +278,8 @@ After deploying to a new environment:
 - [ ] Schema includes `user_phases` table (columns: `id`, `guid`, `user_guid`, `phase`, `granted_by_guid`, `granted_at`) — migration from #46
 - [ ] Spot-check a downstream `/me/service` call returns `must_change_password` and `effective_phases` fields in the blob
 - [ ] `effective_phases` sourced only from `UserPhase` (#57) — verified via `scripts/phases_migration_report.py`, with SU having explicitly granted phases to every user who should retain access after the cutover
+- [ ] Schema includes the six #1040 tables (`webauthn_credentials`, `totp_secrets`, `patient_links`, `patient_link_history`, `patient_invites`, `patient_link_codes`) — created by `init_db.py`
+- [ ] `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` set; a patient can add a passkey at `/second-factor` (#1040)
 - [ ] Access-request approval on this deployment no longer auto-creates `UserPhase` rows — confirm by test-approving a request and checking the response includes `requested_phases_pending_su_grant` (#57)
 
 ---

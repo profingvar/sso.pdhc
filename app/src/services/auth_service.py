@@ -61,7 +61,7 @@ def _finalize_blob(blob):
     return blob
 
 
-def build_access_blob(user, session, session_id=None):
+def build_access_blob(user, session, session_id=None, token_payload=None):
     """Build the access blob for /api/auth/me response.
 
     Returns dict with:
@@ -76,6 +76,11 @@ def build_access_blob(user, session, session_id=None):
     ``X-Operator-Session-Id`` on onward calls so downstream audit logs
     can correlate "all reads under this operator session" for the
     Lag (2022:913) chain-of-custody requirement.
+
+    ``token_payload`` (#1040) is the decoded JWT that carried the request. For
+    a patient it decides ``second_factor.verified``: that field is about THIS
+    token, not about the account. A caller that passes no payload gets
+    ``verified: false``, which is the safe direction.
     """
     blob = {
         'user_guid': user.guid,
@@ -98,6 +103,14 @@ def build_access_blob(user, session, session_id=None):
             blob['in_registry'] = patient.in_registry
             blob['registries'] = patient.registries or []
             blob['fhir_resource_type'] = Patient.FHIR_RESOURCE_TYPE
+        # #1040 (patient app). Both are ALWAYS present for a patient, so a
+        # consumer never has to tell "absent" from "false":
+        #   patient_link   null until care has linked the account to a patient
+        #   second_factor  enrolled = the account; verified = this token
+        from src.services.patient_link import link_for_blob
+        from src.services.second_factor import second_factor_for_blob
+        blob['patient_link'] = link_for_blob(session, user)
+        blob['second_factor'] = second_factor_for_blob(session, user, token_payload)
 
     elif user.user_type == 'professional':
         professional = session.query(Professional).filter_by(user_id=user.id).first()

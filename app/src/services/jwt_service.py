@@ -17,7 +17,7 @@ class TokenRevokedError(Exception):
     pass
 
 
-def issue_token(user_guid, secret_key, expiry_hours=24):
+def issue_token(user_guid, secret_key, expiry_hours=24, second_factor=None):
     """Issue a JWT with user_guid as subject and a unique token_guid (jti).
 
     Also embeds a stable per-session id (``sid``) claim — same value
@@ -25,6 +25,14 @@ def issue_token(user_guid, secret_key, expiry_hours=24):
     login → new token → fresh sid (ticket #191, Lag 2022:913
     chain-of-custody correlation). Logout revokes the token, which
     also retires its sid.
+
+    ``second_factor`` (#1040): ``{'method': 'passkey'|'totp', 'verified_at':
+    <epoch seconds>}`` when THIS login presented a second factor. It becomes
+    the claims ``sfm`` / ``sfa``, and is the only source of
+    ``second_factor.verified`` in the access blob. Omitted (the default), the
+    token says nothing about a second factor and the blob reports
+    ``verified: false`` — so every caller that does not pass it stays
+    password-only, by construction rather than by remembering to.
     """
     now = datetime.now(timezone.utc)
     payload = {
@@ -34,6 +42,9 @@ def issue_token(user_guid, secret_key, expiry_hours=24):
         'iat': now,
         'exp': now + timedelta(hours=expiry_hours),
     }
+    if second_factor:
+        payload['sfm'] = second_factor['method']
+        payload['sfa'] = int(second_factor['verified_at'])
     return jwt.encode(payload, secret_key, algorithm='HS256')
 
 

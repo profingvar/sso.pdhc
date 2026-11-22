@@ -554,3 +554,31 @@ Survey: sso_app is the only service with a FILE audit log; the rest keep audit i
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — POST /admin/set-professional-role
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/su_admin.html — fetch headers carry the CSRF token; "Byt roll" per affiliation; role select per professional
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_s9_session_ui.py (NEW)
+
+## 2026-11-22 — #1040: second factor for patient accounts + patient link (#1039, manuals #1046)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/models/second_factor.py (NEW) — WebAuthnCredential, TotpSecret
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/models/patient_link.py (NEW) — PatientLink, PatientLinkHistory, PatientInvite, PatientLinkCode
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/models/__init__.py — registers the six models
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/secret_store.py (NEW) — keyed hash + Fernet, keys derived from SECRET_KEY
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/second_factor.py (NEW) — passkey + TOTP policy, blob object
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/patient_link.py (NEW) — invite, link code, redeem, SU relink/unlink
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/jwt_service.py — issue_token(second_factor=) writes sfm/sfa
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/auth_service.py — blob: patient_link, second_factor (token_payload)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/auth.py — /me and /me/service pass the token payload
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/patient_access.py (NEW) — Bearer API
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/second_factor_ui.py (NEW) — session pages: step-up, enrolment, invite page, linking forms
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — /login: patient branch; allowlist on the GET auto-redirect branch; dashboard context
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/app.py — registers both blueprints (API one CSRF-exempt), config keys
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/config.py — WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN / WEBAUTHN_RP_NAME / PATIENTAPP_URL
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/static/js/second_factor.js (NEW) — passkey ceremony in the browser
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/second_factor.html, second_factor_login.html, patient_invite.html, patient_invite_created.html, patient_link_code.html (NEW)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/templates/dashboard.html — patient-app card (patient), linking forms (care)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/requirements.txt — webauthn==2.7.1, pyotp==2.9.0, cryptography==50.0.2
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/.env.example — the four new variables, no secrets
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/scripts/test_endpoints.sh — five no-auth probes
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_patient_app_1040.py (NEW); /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_models.py (table list)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/user-guide.md — second factor; "Så kommer du som patient in i patientappen"; care staff linking
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/architecture.md — patient login, patient link, blob, tables, endpoint map
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/api-reference.md, admin-manual.md, deployment-guide.md (operator steps), integration-guide.md, subservice-onboarding.md
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/sso.pdhc/changed_files.md, /Users/martiningvar/T7_sidewinder/sso.pdhc/newtask.txt (NEW)
+- /Users/martiningvar/T7_sidewinder/plans/patient_app_contract.md — Deviations, `[sso]` lines (outside this repo, as the contract instructs)

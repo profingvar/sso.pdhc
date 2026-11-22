@@ -350,3 +350,34 @@ Handle these SSO error scenarios in your service:
 7. Use `/api/public/organisations` for organisation data
 8. Register in `oath_overview.csv` via SU admin
 9. Test: login flow, token validation, authorization, token expiry handling
+
+
+## Patient accounts: second factor and patient link (#1040)
+
+For `user_type == "patient"` the blob carries two more objects (see
+*Architecture → Patient Access Blob*). Both are **delegated controls**: SSO
+reports them, your service refuses on them. A service that serves a patient
+their own data requires all four, and names the state it refuses with:
+
+```python
+def patient_gate(blob):
+    if blob.get('user_type') != 'patient':
+        return 'not_patient'
+    if not (blob.get('second_factor') or {}).get('verified'):
+        return 'second_factor_required'      # send the browser to SSO /login
+    if blob.get('must_change_password'):
+        return 'must_change_password'
+    if not (blob.get('patient_link') or {}).get('ips_patient_guid'):
+        return 'not_linked'                  # tell the patient to give their
+    return None                              # link code to their care unit
+```
+
+- `second_factor.verified` is about the **token**, not the account. Do not
+  read `enrolled` instead.
+- The patient to serve is `patient_link.ips_patient_guid`. `patient_guid` in
+  the same blob is SSO's own row and is not the eps patient guid.
+- Re-validate on every request (never cache the blob): an SU can unlink an
+  account or reset its second factor, and both must take effect at once.
+- Sending the browser to `{SSO}/login?next=<your callback>&state=…` is enough:
+  SSO walks the patient through the second factor (or enrolment) and only then
+  redirects back with a token.

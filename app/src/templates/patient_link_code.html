@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Länkkod — sso.pdhc{% endblock %}
+{% block content %}
+<div style="max-width: 500px; margin: 2rem auto;">
+    <div class="card">
+        <h2>Din länkkod</h2>
+        <p style="font-size:2rem; letter-spacing:0.15em; text-align:center;"><code>{{ code }}</code></p>
+        <p><strong>Ge den här koden till din vårdenhet.</strong> Vårdenheten kopplar då ditt konto
+            till dig som patient. Därefter kan du använda patientappen.</p>
+        <p class="text-muted">Koden visas bara nu, kan användas en gång och gäller till
+            {{ expires_at.strftime('%Y-%m-%d %H:%M') }} UTC. Skapar du en ny kod slutar den här att gälla.</p>
+        <p><a href="/dashboard">Tillbaka</a></p>
+    </div>
+</div>
+{% endblock %}

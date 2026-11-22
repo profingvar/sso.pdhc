@@ -130,6 +130,13 @@ log "--- Patient Endpoints (require auth) ---"
 check "Register patient (missing data)" POST "/api/patient/register" "400" \
     -H "Content-Type: application/json" -d '{}'
 check "Registry status (no auth)" GET "/api/patient/registry-status" "401"
+
+# #1040: patient link + second factor. No-auth probes only: each must refuse.
+check "Link code (no auth)" POST "/api/patient/link-code" "401"
+check "Patient invite (no auth)" POST "/api/patient-links/invites" "401"
+check "Redeem link code (no auth)" POST "/api/patient-links/redeem" "401"
+check "Second-factor status (no auth)" GET "/api/auth/second-factor" "401"
+check "Unknown patient invite" GET "/patient-invite/not-a-real-token" "404"
 log ""
 
 # -------------------------------------------------------------------

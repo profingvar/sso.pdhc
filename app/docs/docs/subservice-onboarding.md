@@ -148,6 +148,8 @@ Key fields to use:
 | `patient_guid` | UUID | Patient record GUID (patient users only) |
 | `professional_guid` | UUID | Professional record GUID (professional users only) |
 | `in_registry` | boolean | Whether the patient is enrolled in a registry (patient users only) |
+| `patient_link` | object or `null` | **#1040**, patient users only. `{ips_patient_guid, linked_at, linked_by}` once care has linked the account to an eps patient; `null` before. The patient to serve is `ips_patient_guid`, not `patient_guid` |
+| `second_factor` | object | **#1040**, patient users only. `{enrolled, verified, method, verified_at}`. `verified` is about THIS token. A service serving patient data MUST refuse when it is not `true` — a delegated control, like `must_change_password`. See the Integration Guide |
 
 ### 4.3 Phase-Based Authorization (mandatory if service is phase-gated)
 

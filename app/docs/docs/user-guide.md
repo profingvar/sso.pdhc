@@ -140,12 +140,36 @@ redirect to change-password in that case.
 3. Submit — your account is created immediately
 4. You can now log in
 
+Only care units are offered in the list. If your care unit has **invited** you,
+use the link they gave you instead — see the section below.
+
 ### Logging In
 
 1. Go to `/login`
 2. Enter your email and password
 3. Click **Login**
-4. You will see your patient dashboard
+4. **Second factor (#1040).** A patient account logs in with two things: the
+   password, and a second factor.
+    - The first time, you are taken to **Andra faktor** (`/second-factor`) to
+      add one. Choose a **passkey** (recommended) or an **authenticator app**.
+    - Every time after that, you confirm with the passkey or type the six-digit
+      code from the app before you are let in.
+5. You will see your patient dashboard
+
+### Second factor: passkey or authenticator app
+
+| | Passkey (recommended) | Authenticator app (reserve) |
+|---|---|---|
+| What it is | A key saved in your phone, tablet or computer | An app showing a six-digit code that changes every 30 seconds |
+| How you use it | Face ID, fingerprint or the device's code | Type the code |
+| Add it | **Lägg till passkey** on `/second-factor` | **Koppla autentiseringsapp**, enter the key in the app, then type one code to confirm |
+
+- You can add more than one passkey (for example phone and computer).
+- You can remove a factor on the same page, but **not the last one**.
+- A code can be used once. After five wrong codes the app login is locked for
+  15 minutes; a passkey still works.
+- **Lost your device?** Contact your care unit. An administrator can reset your
+  second factor; you then add a new one at your next login.
 
 ### Dashboard
 
@@ -154,6 +178,64 @@ The patient dashboard shows:
 - **Registry status** — whether you are enrolled in any registries
 - **Registries** — list of registries you participate in (e.g., INCA)
 - **Organisation** — your affiliated organisation
+- **Patientappen** — whether a second factor is added, whether your account is
+  linked to your care unit, the **Skapa länkkod** button while it is not, and
+  the link to the patient app once both are done
+
+### Så kommer du som patient in i patientappen
+
+Patientappen finns på <https://patientapp.pdhc.se>. Där svarar du på frågor och
+formulär från din vårdenhet. För att komma in behöver du tre saker: ett konto,
+en andra faktor och en koppling till din vårdenhet. Det finns två vägar dit.
+
+**Väg 1: Din vårdenhet bjuder in dig (vanligast)**
+
+1. Du får en länk av din vårdenhet. Länken fungerar en gång och gäller i sju dagar.
+2. Öppna länken. Fyll i e-post, personnummer och ett lösenord på minst åtta tecken.
+3. Välj **Skapa konto**. Kontot är nu kopplat till dig hos vårdenheten.
+4. Lägg till en andra faktor. Välj **Lägg till passkey** och bekräfta med
+   Face ID, fingeravtryck eller enhetens kod. Har du ingen passkey kan du i
+   stället koppla en autentiseringsapp.
+5. Gå till <https://patientapp.pdhc.se> och logga in.
+
+**Väg 2: Du registrerar dig själv**
+
+1. Gå till <https://sso.pdhc.se> och välj **Register**. Fyll i e-post,
+   lösenord och personnummer, och välj din vårdenhet i listan.
+2. Logga in med e-post och lösenord.
+3. Lägg till en andra faktor på samma sätt som i väg 1, steg 4.
+4. Välj **Skapa länkkod** på din sida. Du får en kod som ser ut så här:
+   `ABCD-EFGH`. Koden visas bara en gång och gäller i sju dagar.
+5. **Ge koden till din vårdenhet**, till exempel vid ett besök eller i telefon.
+   Vårdenheten kopplar då ditt konto till dig som patient.
+6. När vårdenheten har gjort det går du till <https://patientapp.pdhc.se> och
+   loggar in.
+
+**Om det inte fungerar**
+
+- *Patientappen säger att kontot inte är kopplat.* Vårdenheten har inte lagt in
+  din kod ännu. Skapa en ny kod om den gamla har gått ut, och ge den till
+  vårdenheten.
+- *Länken från vårdenheten gäller inte.* Den är redan använd eller för gammal.
+  Be vårdenheten om en ny.
+- *Du har bytt eller tappat din telefon.* Kontakta din vårdenhet, så får du
+  lägga till en ny andra faktor.
+
+Varje gång du loggar in gör du det i två steg: först lösenordet, sedan din
+passkey eller koden från appen. Sedan kommer du till <https://patientapp.pdhc.se>.
+
+### For care staff: linking a patient account
+
+On your **Dashboard**, the card **Patient app: link a patient account** has two
+forms. Both need the patient's GUID in eps.pdhc; check it carefully, because
+the account will see that patient's tasks.
+
+- **Invite a patient** — creates a one-time link (valid 7 days). It is shown
+  once; give it to the patient.
+- **Patient gave you a link code** — enter the code and the patient guid.
+
+You can do this for the care units you are affiliated to. A link cannot be
+changed afterwards except by an SU admin.
 
 ### Viewing Registry Status
 

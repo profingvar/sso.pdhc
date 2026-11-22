@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Andra faktor — sso.pdhc{% endblock %}
+{% block content %}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<h2 class="mb-2">Andra faktor</h2>
+
+{% if not enrolled %}
+<div class="flash flash-warning">
+    Du behöver lägga till en andra faktor innan du kan använda patientappen.
+    Välj passkey (rekommenderas) eller en autentiseringsapp.
+</div>
+{% elif resume_pending %}
+<div class="flash flash-success">Klart. Du skickas vidare när du har lagt till din andra faktor.</div>
+{% endif %}
+
+<div class="grid-2">
+    <div class="card">
+        <h3>Passkey (rekommenderas)</h3>
+        <p class="text-muted">En passkey sparas i din telefon, surfplatta eller dator och låses upp
+            med Face ID, fingeravtryck eller enhetens kod.</p>
+        {% if passkeys %}
+        <table>
+            <thead><tr><th>Namn</th><th>Tillagd</th><th></th></tr></thead>
+            <tbody>
+            {% for p in passkeys %}
+                <tr>
+                    <td>{{ p.name or 'Passkey' }}</td>
+                    <td>{{ p.created_at.strftime('%Y-%m-%d') if p.created_at else '' }}</td>
+                    <td>
+                        <form method="post" action="/second-factor/remove">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="kind" value="passkey">
+                            <input type="hidden" name="guid" value="{{ p.guid }}">
+                            <button type="submit" class="btn btn-sm btn-secondary">Ta bort</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% if passkey_ready %}
+        <div class="form-group mt-2">
+            <label for="passkey-name">Namn på enheten (valfritt)</label>
+            <input type="text" id="passkey-name" maxlength="100" placeholder="t.ex. Min iPhone">
+        </div>
+        <button class="btn btn-primary" data-passkey="register"
+                data-options="/second-factor/passkey/options"
+                data-verify="/second-factor/passkey/verify">Lägg till passkey</button>
+        <p id="passkey-message" class="flash flash-error mt-2" hidden></p>
+        {% else %}
+        <p class="flash flash-warning">Passkeys är inte påslagna på den här servern. Använd en autentiseringsapp.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h3>Autentiseringsapp (reserv)</h3>
+        <p class="text-muted">En app som visar en sexsiffrig kod som byts var 30:e sekund,
+            till exempel Microsoft Authenticator eller Google Authenticator.</p>
+        {% if totp_enrolled %}
+            <p><span class="badge badge-approved">Kopplad</span></p>
+            <form method="post" action="/second-factor/remove">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="kind" value="totp">
+                <button type="submit" class="btn btn-sm btn-secondary">Ta bort</button>
+            </form>
+        {% elif totp_setup %}
+            <p>1. Öppna appen och lägg till ett konto. Skriv in nyckeln:</p>
+            <p><code style="font-size:1.05rem; word-break:break-all;">{{ totp_setup.secret }}</code></p>
+            <p class="text-muted" style="font-size:0.85rem;">På samma enhet som appen?
+                <a href="{{ totp_setup.uri }}">Öppna i appen</a>.</p>
+            <p>2. Skriv koden som appen visar:</p>
+            <form method="post" action="/second-factor/totp/confirm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-group">
+                    <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code"
+                           pattern="[0-9 ]{6,7}" required aria-label="Kod">
+                </div>
+                <button type="submit" class="btn btn-primary">Bekräfta</button>
+            </form>
+        {% else %}
+            <form method="post" action="/second-factor/totp/start">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-secondary">Koppla autentiseringsapp</button>
+            </form>
+        {% endif %}
+    </div>
+</div>
+
+{% if enrolled %}
+<div class="card">
+    <h3>Patientappen</h3>
+    {% if not verified %}
+        <p>Logga ut och in igen med din andra faktor för att fortsätta.</p>
+    {% elif not linked %}
+        <p>Ditt konto är ännu inte kopplat till din vårdenhet.
+            <a href="/dashboard">Skapa en länkkod</a> och ge den till vårdenheten.</p>
+    {% elif patientapp_url %}
+        <p><a class="btn btn-primary" href="{{ patientapp_url }}">Gå till patientappen</a></p>
+    {% else %}
+        <p>Ditt konto är klart för patientappen.</p>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/second_factor.js') }}"></script>
+{% endblock %}

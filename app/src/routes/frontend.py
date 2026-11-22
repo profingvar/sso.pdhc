@@ -84,7 +84,8 @@ def _force_password_change_gate():
     # Never touch API / FHIR / static / asset / auth paths.
     if (path.startswith('/api/') or path.startswith('/fhir/')
             or path.startswith('/static/') or path.startswith('/docs/')
-            or path in ('/change-password', '/login', '/logout', '/favicon.ico')):
+            or path in ('/change-password', '/login', '/logout', '/favicon.ico')
+            or path.startswith('/login/')):
         return None
     try:
         user = _get_session_user()
@@ -234,9 +235,21 @@ def login_page():
     # Auto-redirect: if already logged in and next is provided
     if next_url and _get_session_user() is not None:
         from urllib.parse import urlencode
+        from src.routes.second_factor_ui import callback_allowed, patient_handshake
+        # #1040: this branch minted a token and redirected to ANY `next`,
+        # with no allowlist check — only the POST branch below had one. A
+        # link to /login?next=<anywhere> opened by a logged-in user handed a
+        # valid token to that address. Same rule on both branches now.
+        if not callback_allowed(next_url):
+            flash('Callback URL not in allowlist.', 'warning')
+            return redirect(url_for('frontend.dashboard'))
         secret = current_app.config.get('SECRET_KEY', '')
         expiry_hours = current_app.config.get('SESSION_EXPIRY_HOURS', 24)
         user = _get_session_user()
+        if user.user_type == 'patient':
+            # #1040: a patient's token reaches a service only after a second
+            # factor, and carries the claim that says so.
+            return patient_handshake(user, next_url, state)
         token = issue_token(user.guid, secret, expiry_hours=expiry_hours)
         params = {'token': token}
         if state:
@@ -259,6 +272,13 @@ def login_page():
                   ip=request.remote_addr)
             flash('Invalid email or password.', 'error')
             return render_template('login.html', next_url=next_url, state=state)
+
+        if user.user_type == 'patient':
+            # #1040: the password is only the first factor for a patient. No
+            # token is issued here when a second factor is enrolled; see
+            # routes/second_factor_ui.py for the rule.
+            from src.routes.second_factor_ui import begin_patient_login
+            return begin_patient_login(user, next_url, state, email=email)
 
         secret = current_app.config.get('SECRET_KEY', '')
         expiry_hours = current_app.config.get('SESSION_EXPIRY_HOURS', 24)
@@ -408,9 +428,28 @@ def dashboard():
         from src.models.patient import Patient
         patient = db.query(Patient).filter_by(user_id=user.id).first()
 
+    # #1040: patient-app state (patient) and the linking forms (care).
+    from src.services import patient_link as _pl
+    from src.services import second_factor as _sf
+    patient_app = None
+    link_units = []
+    if user.user_type == 'patient':
+        patient_app = {
+            'linked': _pl.current_link(db, user.guid) is not None,
+            'second_factor_enrolled': _sf.is_enrolled(db, user.guid),
+            'url': current_app.config.get('PATIENTAPP_URL') or '',
+        }
+    else:
+        from src.services.care_hierarchy import enrollable_care_units
+        allowed = None if user.is_su_admin else _pl.actor_units(db, user)
+        link_units = [{'guid': o.guid, 'name': o.name}
+                      for o in enrollable_care_units(db)
+                      if allowed is None or o.guid in allowed]
+
     return render_template('dashboard.html',
                            professional=professional, patient=patient,
-                           groups=groups, org_names=org_names)
+                           groups=groups, org_names=org_names,
+                           patient_app=patient_app, link_units=link_units)
 
 
 # ---------------------------------------------------------------------------

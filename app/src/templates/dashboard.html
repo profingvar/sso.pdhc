@@ -67,6 +67,69 @@
 </div>
 {% endif %}
 
+{% if current_user.user_type == 'professional' or current_user.is_su_admin %}
+<div class="card">
+    <h3>Patient app: link a patient account</h3>
+    {% if link_units %}
+    <p class="text-muted">The patient guid is the patient's GUID in eps.pdhc. Check it carefully:
+        the account will see that patient's tasks. A link can only be changed by an SU admin.</p>
+    <div class="grid-2">
+        <form method="post" action="/patient-link/invite">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <strong>Invite a patient</strong>
+            <div class="form-group">
+                <label for="inv-guid">Patient guid (eps)</label>
+                <input type="text" id="inv-guid" name="ips_patient_guid" required>
+            </div>
+            <div class="form-group">
+                <label for="inv-unit">Care unit</label>
+                <select id="inv-unit" name="care_unit_guid" required>
+                    {% for u in link_units %}<option value="{{ u.guid }}">{{ u.name }}</option>{% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-sm btn-primary">Create invite link</button>
+        </form>
+        <form method="post" action="/patient-link/redeem">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <strong>Patient gave you a link code</strong>
+            <div class="form-group">
+                <label for="red-code">Link code</label>
+                <input type="text" id="red-code" name="link_code" required placeholder="ABCD-EFGH">
+            </div>
+            <div class="form-group">
+                <label for="red-guid">Patient guid (eps)</label>
+                <input type="text" id="red-guid" name="ips_patient_guid" required>
+            </div>
+            <button type="submit" class="btn btn-sm btn-primary">Link account</button>
+        </form>
+    </div>
+    {% else %}
+    <p class="text-muted">You have no active care-unit affiliation, so you cannot link patients.</p>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if current_user.user_type == 'patient' and patient_app %}
+<div class="card">
+    <h3>Patientappen</h3>
+    <p><strong>Andra faktor:</strong>
+        {% if patient_app.second_factor_enrolled %}tillagd{% else %}saknas{% endif %}
+        — <a href="/second-factor">hantera</a></p>
+    {% if patient_app.linked %}
+        <p><strong>Koppling till vårdenhet:</strong> klar.</p>
+        {% if patient_app.url and patient_app.second_factor_enrolled %}
+        <p><a class="btn btn-primary" href="{{ patient_app.url }}">Gå till patientappen</a></p>
+        {% endif %}
+    {% else %}
+        <p><strong>Koppling till vårdenhet:</strong> saknas. Skapa en länkkod och ge den till din vårdenhet.</p>
+        <form method="post" action="/patient-link/code">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-primary">Skapa länkkod</button>
+        </form>
+    {% endif %}
+</div>
+{% endif %}
+
 {% if current_user.user_type == 'patient' %}
 <div class="card">
     <h3>Registry Status</h3>

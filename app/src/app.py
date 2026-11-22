@@ -38,6 +38,10 @@ def create_app(config_override=None):
             ALLOWED_CALLBACK_URLS=cfg.ALLOWED_CALLBACK_URLS,
             SERVICE_CREDENTIALS=cfg.SERVICE_CREDENTIALS,
             INTERNAL_SERVICE_KEY=cfg.INTERNAL_SERVICE_KEY,
+            WEBAUTHN_RP_ID=cfg.WEBAUTHN_RP_ID,
+            WEBAUTHN_ORIGIN=cfg.WEBAUTHN_ORIGIN,
+            WEBAUTHN_RP_NAME=cfg.WEBAUTHN_RP_NAME,
+            PATIENTAPP_URL=cfg.PATIENTAPP_URL,
             WTF_CSRF_ENABLED=True,
             WTF_CSRF_SSL_STRICT=False,
         )
@@ -127,9 +131,17 @@ def create_app(config_override=None):
     from src.routes.registry import registry_bp
     app.register_blueprint(registry_bp)
 
+    # #1040: patient link + second factor. The API blueprint is Bearer and
+    # CSRF-exempt below; the UI blueprint is session-cookie and is NOT.
+    from src.routes.patient_access import patient_access_bp
+    app.register_blueprint(patient_access_bp)
+    from src.routes.second_factor_ui import sf_ui_bp
+    app.register_blueprint(sf_ui_bp)
+
     # Exempt API blueprints from CSRF — they use Bearer tokens, not cookies
     from src.middleware.csrf import csrf
-    for bp in [auth_bp, patient_bp, groups_bp, admin_bp, public_bp, fhir_bp, internal_bp, partners_bp, read_grants_bp]:
+    for bp in [auth_bp, patient_bp, groups_bp, admin_bp, public_bp, fhir_bp, internal_bp, partners_bp, read_grants_bp,
+               patient_access_bp]:
         csrf.exempt(bp)
 
     # --- Error handlers: catch exceptions and log them ---

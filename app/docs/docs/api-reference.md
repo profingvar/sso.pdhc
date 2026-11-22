@@ -303,6 +303,107 @@ Returns the patient's registry enrolment status. Only own data is accessible.
 
 ---
 
+## Patient app: link and second factor (#1040)
+
+Bearer token on every route. Errors use the standard shape
+`{"error": "<code>", "message": "…"}`.
+
+### `POST /api/patient/link-code`
+
+Patient only. A one-time code for an account that is not yet linked. A new code
+replaces any earlier unused one. The code is in this response and nowhere else
+(a keyed hash is stored).
+
+**Response** `201`:
+```json
+{"link_code": "ABCD-EFGH", "expires_at": "2026-11-29T09:00:00+00:00",
+ "message": "Give this code to your care unit."}
+```
+
+| Code | Error | When |
+|------|-------|------|
+| 403 | `forbidden` | Not a patient account |
+| 409 | `account_already_linked` | The account already has a patient link |
+
+### `POST /api/patient-links/invites`
+
+An activated professional with an active affiliation to `care_unit_guid`, or an
+SU admin. `care_unit_guid` may be omitted when the caller has exactly one unit.
+
+**Request**:
+```json
+{"ips_patient_guid": "<eps patient guid>", "care_unit_guid": "<care unit guid>"}
+```
+
+**Response** `201` — `invite_url` is shown ONCE; it opens for 7 days, once:
+```json
+{"invite_guid": "…", "ips_patient_guid": "…", "care_unit_guid": "…",
+ "expires_at": "…", "invite_url": "https://sso.pdhc.se/patient-invite/<token>"}
+```
+
+| Code | Error | When |
+|------|-------|------|
+| 400 | `invalid_request` | `ips_patient_guid` is not a GUID, or `care_unit_guid` missing and ambiguous |
+| 403 | `forbidden` / `not_affiliated` / `must_change_password` | Not a professional; not affiliated to that unit (or not activated); password change pending |
+| 404 | `not_found` | Not a care unit a patient can belong to |
+| 409 | `patient_already_linked` | That patient already has an account |
+
+### `DELETE /api/patient-links/invites/<invite_guid>`
+
+Revokes an unused invite. Same caller rule; an invite of a unit you are not
+affiliated to answers `404`, like one that does not exist. `409 invite_used`.
+
+### `POST /api/patient-links/redeem`
+
+Care enters the patient's link code together with the eps patient guid. The
+unit is the one the patient registered at.
+
+**Request**: `{"link_code": "ABCD-EFGH", "ips_patient_guid": "<guid>"}`
+(the code is case-insensitive; dashes and spaces are ignored)
+
+**Response** `200`:
+```json
+{"user_guid": "…", "method": "link_code",
+ "patient_link": {"ips_patient_guid": "…", "linked_at": "…", "linked_by": "…"}}
+```
+
+| Code | Error | When |
+|------|-------|------|
+| 403 | `forbidden` / `must_change_password` | Not a professional or SU; password change pending |
+| 404 | `link_code_not_found` | Unknown, used or expired code — **and** a valid code of a patient at a unit the caller is not affiliated to. One answer for all, by design |
+| 409 | `patient_already_linked` / `account_already_linked` | One account ↔ one patient |
+
+### `PUT /api/admin/patient-links/<user_guid>` · `DELETE …`
+
+SU admin only. `PUT {"ips_patient_guid": "…", "reason": "…"}` relinks (or links
+an unlinked account); `DELETE {"reason": "…"}` unlinks. `reason` is required and
+recorded in `patient_link_history` and the audit log.
+
+### `GET /api/auth/second-factor`
+
+Own state: the blob's `second_factor` object plus `enrolled_methods`
+(`["passkey", "totp"]`).
+
+### `POST /api/admin/users/<user_guid>/second-factor/reset`
+
+SU admin only. Removes every passkey and the TOTP secret of the user and ends
+all their sessions. Response `200 {"user_guid": "…", "removed": <n>}`.
+
+!!! warning
+    After a reset the account enrols a new factor with its password alone.
+    Verify who is asking before you reset.
+
+### Browser routes (session cookie, CSRF)
+
+The passkey ceremony needs the browser, so enrolment and the login step live on
+pages, not in the JSON API: `/second-factor` (manage), `/login/second-factor`
+(step-up after the password), `/patient-invite/<token>` (accept an invite),
+`/patient-link/code` (patient), `/patient-link/invite` and
+`/patient-link/redeem` (care, from the dashboard). See *Architecture → Patient
+login*.
+
+---
+
 ## Groups (`/api/groups`)
 
 ### `GET /api/groups`
