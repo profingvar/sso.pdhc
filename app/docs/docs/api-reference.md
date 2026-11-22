@@ -358,14 +358,33 @@ SU admin. `care_unit_guid` may be omitted when the caller has exactly one unit.
 
 **Request**:
 ```json
-{"ips_patient_guid": "<eps patient guid>", "care_unit_guid": "<care unit guid>"}
+{"ips_patient_guid": "<eps patient guid>", "care_unit_guid": "<care unit guid>",
+ "given_name": "Anna", "family_name": "Andersson"}
 ```
+
+`given_name`/`family_name` (#1050) are optional but go together (both or
+neither, else `400 invalid_request`), at most 100 characters each. They are
+shown on the invite page ("Inbjudan gäller …") and become the account's
+`patient_profiles` row, i.e. the blob's `display_name`. dashboard.pdhc's
+**Bjud in patient** always sends them.
 
 **Response** `201` — `invite_url` is shown ONCE; it opens for 7 days, once:
 ```json
 {"invite_guid": "…", "ips_patient_guid": "…", "care_unit_guid": "…",
+ "given_name": "Anna", "family_name": "Andersson",
  "expires_at": "…", "invite_url": "https://sso.pdhc.se/patient-invite/<token>"}
 ```
+
+**Accepting** (`/patient-invite/<token>`, HTML, #1050): the patient types the
+personnummer, email and password. SSO asks eps
+`POST {EPS_BASE_URL}/api/v1/patients/<ips_patient_guid>/identifier-match`
+(`ApiKey`, scope `patients:identifier-match`, body `{"personnummer"}`,
+answer `{"match": true|false}`) — SSO never reads the number from eps. A
+mismatch is a form error ("Personnumret stämmer inte med inbjudan…"), counted
+on the invite; the fifth closes it (the link then answers like an unknown
+one). eps unreachable or refusing → "Försök igen om en stund.", nothing
+counted. After the passkey is added the browser goes to
+`{PATIENTAPP_URL}/auth/login`.
 
 | Code | Error | When |
 |------|-------|------|

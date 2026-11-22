@@ -5,32 +5,40 @@
     <div class="card">
     {% if invalid %}
         <h2>Länken gäller inte</h2>
-        <p>Inbjudan är redan använd, har gått ut eller har dragits tillbaka.
-            Be din vårdenhet om en ny.</p>
+        <p>Inbjudan är redan använd, har gått ut, har dragits tillbaka eller har
+            stängts efter för många felaktiga personnummer. Be din vårdenhet om en ny.</p>
         <p class="text-muted">Har du redan ett konto? <a href="/login">Logga in</a>.</p>
     {% else %}
-        <h2>Skapa ditt konto</h2>
-        <p class="text-muted">{{ unit_name }} har bjudit in dig till patientappen.
-            Kontot kopplas till dig hos vårdenheten när du har skapat det.</p>
-        <form method="post">
+        <h2>Inbjudan från {{ unit_name or 'din vårdenhet' }}</h2>
+        {% if patient_name %}
+        <p>Inbjudan gäller <strong>{{ patient_name }}</strong>.</p>
+        {% endif %}
+        <p class="text-muted">Skapa ditt konto till patientappen. Kontot kopplas
+            till dig hos vårdenheten. Ange ditt personnummer: det måste stämma med
+            det vårdenheten har registrerat.</p>
+        <form method="post" autocomplete="off">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group">
-                <label for="email">E-post</label>
-                <input type="email" id="email" name="email" required>
+                <label for="personnummer">Personnummer</label>
+                <input type="text" id="personnummer" name="personnummer" required
+                       inputmode="numeric" maxlength="13" autocomplete="off">
+                <p class="hint">ÅÅÅÅMMDD-XXXX eller ÅÅMMDD-XXXX</p>
             </div>
             <div class="form-group">
-                <label for="personnummer">Personnummer</label>
-                <input type="text" id="personnummer" name="personnummer" required pattern="\d{12}" maxlength="12">
-                <p class="hint">12 siffror (ÅÅÅÅMMDDXXXX)</p>
+                <label for="email">E-post</label>
+                <input type="email" id="email" name="email" required value="{{ email or '' }}">
+                <p class="hint">Du loggar in med din e-postadress.</p>
             </div>
             <div class="form-group">
                 <label for="password">Lösenord</label>
-                <input type="password" id="password" name="password" required minlength="8">
+                <input type="password" id="password" name="password" required minlength="8"
+                       autocomplete="new-password">
                 <p class="hint">Minst 8 tecken</p>
             </div>
             <button type="submit" class="btn btn-primary" style="width:100%;">Skapa konto</button>
         </form>
-        <p class="text-muted mt-2" style="font-size:0.85rem;">I nästa steg lägger du till en andra faktor (passkey).</p>
+        <p class="text-muted mt-2" style="font-size:0.85rem;">I nästa steg lägger du till en
+            passkey. Sedan kommer du till patientappen och loggar in.</p>
     {% endif %}
     </div>
 </div>

@@ -118,6 +118,23 @@ class FakeEps:
     def __init__(self):
         self.patients, self.mode, self.calls = {}, 'ok', []
         self.canonical = {}     # identifier asked for -> platform guid eps names
+        # #1050: the personnummer eps holds per patient guid (12 digits), for
+        # POST /patients/<guid>/identifier-match (the invite page).
+        self.pnrs, self.match_calls = {}, []
+
+    def post(self, url, headers, json_body, timeout):
+        """Where `eps_client._http_post` is, for identifier-match only."""
+        assert url.endswith('/identifier-match'), url
+        self.match_calls.append({'url': url, 'headers': dict(headers),
+                                 'json': dict(json_body)})
+        if self.mode == 'down':
+            raise requests.ConnectionError('refused')
+        if self.mode == 'foreign404':
+            return _Resp(404, {'error': 'not_found', 'service': '1177.pdhc'})
+        guid = url.rsplit('/patients/', 1)[1].split('/')[0]
+        if guid not in self.patients:
+            return _Resp(404, {'error': 'Patient not found'})
+        return _Resp(200, {'match': self.pnrs.get(guid) == json_body.get('personnummer')})
 
     def list_at(self, patient, *units, active=True, clinic_guid=None):
         self.patients[patient] = [
@@ -187,6 +204,7 @@ def world(events, monkeypatch):
     above and lists IPS_1 and IPS_2 at unit A."""
     eps = FakeEps()
     monkeypatch.setattr('src.services.eps_client._http_get', eps)
+    monkeypatch.setattr('src.services.eps_client._http_post', eps.post)
     from src.models.affiliation import Affiliation
     from src.models.organisation import Organisation
     from src.models.patient import Patient
@@ -231,6 +249,7 @@ def world(events, monkeypatch):
         }
         eps.list_at(IPS_1, unit_a.guid)
         eps.list_at(IPS_2, unit_a.guid)
+        eps.pnrs.update({IPS_1: '199003031234', IPS_2: '199003031234'})
         for name, u in (('pro_a', pro_a), ('pro_b', pro_b), ('su', su),
                         ('pat', pat), ('pending', pending)):
             w[name + '_h'] = {'Authorization': 'Bearer ' + issue_token(u.guid, SECRET, 1)}

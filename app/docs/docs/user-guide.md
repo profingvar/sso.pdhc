@@ -151,34 +151,30 @@ redirect to change-password in that case.
 
 ## Patient Workflow
 
-### Registration
+### Joining: by invitation from your care unit (#1050)
 
-1. Go to `/register-patient` (the patient app's **Registrera dig** button sends
-   you there, with `?next=` set so the login afterwards returns to the app).
-2. Fill in (the page is in Swedish, #1049):
-   - **Förnamn**, **Efternamn**
-   - **Personnummer** — 10 or 12 digits with a real date. *In the pilot only
-     test numbers are accepted*: a number whose check digit is correct is
-     refused with "Piloten tar bara emot testpersonnummer."
+A patient joins the patient app **only by invitation from their care unit**.
+Open self-registration is closed (#1050 step 1): `/register-patient` shows
+"Du behöver en inbjudan" unless the operator
+turns `PATIENT_SELF_REGISTRATION` on, which is off by default.
+
+1. Your care unit registers you and gives you a one-time link
+   (`/patient-invite/<token>`). It works once and for seven days.
+2. The page says **Inbjudan från <your care unit>** and shows your name.
+3. Fill in (Swedish page):
+   - **Personnummer** — 10 or 12 digits. It must be the SAME number your care
+     unit registered; SSO asks eps (the patient register) and is told only
+     yes or no. A wrong number gives "Personnumret stämmer inte med
+     inbjudan"; after five wrong numbers the link closes and you need a new
+     one. *In the pilot only test numbers are accepted.*
    - **E-post** — this is your login
-   - **Mobilnummer** — optional; `07…` is stored as `+467…` (in eps, not in SSO)
-   - **Din vårdenhet** — select from the list
    - **Lösenord** — minimum 8 characters
-3. Submit. The page then says *"Om uppgifterna kunde registreras kan du logga
-   in nu. Har du redan ett konto loggar du in med det."* — the SAME text whether
-   your account was just created or you already had one (so the page cannot be
-   used to find out who is registered).
-4. Choose **Logga in**. At the first login you add a passkey before you reach
-   the patient app.
+4. **Skapa konto.** The account is created already linked to you at the care
+   unit, with your name. Next you add a **passkey** (or an authenticator app),
+   and then you are taken straight to the patient app's login.
 
-Behind the page, SSO asks eps (the patient register) to create you as a
-patient at the unit you chose. If eps did, your account is linked to your care
-unit straight away. If eps already knew you, the account is created but not
-linked: use **Skapa länkkod** (below). If eps cannot be reached, nothing is
-created and the page says "Försök igen om en stund."
-
-If your care unit has **invited** you, use the link they gave you instead — see
-the section below.
+If eps cannot be reached the page says "Försök igen om en stund." and nothing
+is created.
 
 ### Logging In
 
@@ -221,52 +217,42 @@ The patient dashboard shows:
 
 ### Så kommer du som patient in i patientappen
 
-Patientappen finns på <https://patientapp.pdhc.se>. Där svarar du på frågor och
-formulär från din vårdenhet. För att komma in behöver du tre saker: ett konto,
-en andra faktor och en koppling till din vårdenhet. Det finns två vägar dit.
+Patientappen finns på <https://patientapp.pdhc.se>. Där fyller du i ditt
+patientkort och svarar på frågor från din vårdenhet. Du går med **bara genom en
+inbjudan från din vårdenhet**. Det går inte att registrera sig själv.
 
-**Väg 1: Din vårdenhet bjuder in dig (vanligast)**
+**Så går det till**
 
-1. Du får en länk av din vårdenhet. Länken fungerar en gång och gäller i sju dagar.
-2. Öppna länken. Fyll i e-post, personnummer och ett lösenord på minst åtta tecken.
-3. Välj **Skapa konto**. Kontot är nu kopplat till dig hos vårdenheten.
-4. Lägg till en andra faktor. Välj **Lägg till passkey** och bekräfta med
-   Face ID, fingeravtryck eller enhetens kod. Har du ingen passkey kan du i
-   stället koppla en autentiseringsapp.
-5. Gå till <https://patientapp.pdhc.se> och logga in.
+1. Vårdenheten registrerar dig och ger dig en länk. Länken fungerar en gång och
+   gäller i sju dagar. (Sms kommer senare. Tills vidare får du länken på annat
+   sätt, till exempel vid ett besök.)
+2. Öppna länken. Sidan visar **Inbjudan från** din vårdenhet och ditt namn.
+3. Skriv ditt personnummer. Det måste vara samma nummer som vårdenheten har
+   registrerat. *Under piloten går det bara att använda testpersonnummer.*
+4. Skriv din e-postadress och välj ett lösenord på minst åtta tecken.
+   Välj **Skapa konto**.
+5. Lägg till en passkey: välj **Lägg till passkey** och bekräfta med Face ID,
+   fingeravtryck eller enhetens kod. Har du ingen passkey kan du i stället
+   koppla en autentiseringsapp.
+6. Du kommer direkt till patientappens inloggning och är inne.
 
-**Väg 2: Du registrerar dig själv i appen**
-
-1. Öppna <https://patientapp.pdhc.se> och välj **Registrera dig**. Fyll i
-   förnamn, efternamn, personnummer, e-post, gärna mobilnummer, välj din
-   vårdenhet och ett lösenord på minst åtta tecken.
-   *Under piloten går det bara att använda testpersonnummer.*
-2. Sidan säger: "Om uppgifterna kunde registreras kan du logga in nu. Har du
-   redan ett konto loggar du in med det." Välj **Logga in**.
-3. Logga in med e-post och lösenord. Första gången lägger du till en passkey
-   (eller en autentiseringsapp) innan du kommer vidare. Sedan kommer du till
-   patientappen.
-4. Oftast är kontot då redan kopplat till din vårdenhet. Säger patientappen att
-   kontot inte är kopplat, gör du så här: logga in på <https://sso.pdhc.se> och
-   välj **Skapa länkkod** på din sida. Du får en kod som ser ut så här:
-   `ABCD-EFGH`. Koden visas bara en gång och gäller i sju dagar.
-5. **Ge koden till din vårdenhet**, till exempel vid ett besök eller i telefon.
-   Vårdenheten kopplar då ditt konto till dig som patient.
-6. När vårdenheten har gjort det går du till <https://patientapp.pdhc.se> och
-   loggar in.
+**Har du redan ett konto som inte är kopplat?** Det gäller bara konton som
+skapades innan inbjudan blev det enda sättet. Logga in på
+<https://sso.pdhc.se> och välj **Skapa länkkod**. Ge koden (`ABCD-EFGH`, gäller
+i sju dagar) till din vårdenhet, som kopplar kontot.
 
 **Om det inte fungerar**
 
-- *Patientappen säger att kontot inte är kopplat.* Vårdenheten har inte lagt in
-  din kod ännu. Skapa en ny kod om den gamla har gått ut, och ge den till
-  vårdenheten. Vårdenheten kan bara koppla dig om du är listad hos just den
-  vårdenheten.
-- *Länken från vårdenheten gäller inte.* Den är redan använd eller för gammal.
-  Be vårdenheten om en ny.
+- *"Personnumret stämmer inte med inbjudan."* Kontrollera siffrorna. Efter fem
+  felaktiga försök slutar länken att fungera, och du behöver en ny.
+- *Länken gäller inte.* Den är redan använd, för gammal eller stängd. Be
+  vårdenheten om en ny.
 - *Sidan säger "Försök igen om en stund."* Patientregistret svarade inte.
   Inget konto skapades. Försök igen senare.
 - *Sidan säger "Piloten tar bara emot testpersonnummer."* Under piloten tar vi
   inte emot riktiga personnummer.
+- *Du har redan ett konto.* Logga in med det i patientappen. Ingen ny
+  inbjudan behövs.
 - *Du har bytt eller tappat din telefon.* Kontakta din vårdenhet, så får du
   lägga till en ny andra faktor.
 
@@ -274,6 +260,11 @@ Varje gång du loggar in gör du det i två steg: först lösenordet, sedan din
 passkey eller koden från appen. Sedan kommer du till <https://patientapp.pdhc.se>.
 
 ### For care staff: linking a patient account
+
+**The usual way is dashboard.pdhc's "Bjud in patient" (#1050)**: enter the
+patient's name and personnummer, choose your care unit, and the dashboard
+registers the patient in eps and creates the invite in one go, with the name
+on it. The forms below remain for an SU admin and for the link-code case.
 
 On your **Dashboard**, the card **Patient app: link a patient account** has two
 forms. Both need the patient's GUID in eps.pdhc; check it carefully, because

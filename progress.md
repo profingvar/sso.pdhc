@@ -1127,3 +1127,11 @@ Built against `~/T7_sidewinder/plans/patient_app_contract.md` s7.1 (s1, s6 still
 ## 2026-11-22 — #1050 open registration closed
 - `PATIENT_SELF_REGISTRATION` (default false): `/register-patient` shows "Du behöver en inbjudan", `POST /api/patient/register` answers 403 `registration_closed`; nothing is created and eps is not called. Register links hidden while closed.
 - Tests: `tests/test_registration_closed_1050.py` (8; mutation control: 5 fail with the guard removed). Suite 629 passed.
+
+## 2026-11-22 — #1050 step 2: invitation carries the name; personnummer checked with eps (LOCAL, not deployed)
+- `POST /api/patient-links/invites` takes `given_name` + `family_name` (both or neither); new table `patient_invite_details` (`init_db.py` creates it; no column changes).
+- `/patient-invite/<token>`: "Inbjudan från <unit>" + the name; the typed personnummer must be eps's (eps `identifier-match`, scope `patients:identifier-match`; sso never reads the number). Mismatch = form error, counted, audited without the number; 5 misses close the invite. eps down = "Försök igen om en stund", not counted.
+- The name becomes `patient_profiles` (`display_name`). After the passkey the browser goes to `{PATIENTAPP_URL}/auth/login`.
+- User guide, admin manual, API reference, architecture rewritten for invite-only (self-registration documented as closed by default; the link-code path kept for already-existing unlinked accounts, which the code still offers).
+- Tests: `tests/test_patient_invite_1050.py` (9); `test_patient_app_1040.py` FakeEps answers identifier-match; `test_models.py` lists the new table. Suite 629 -> 638 passed. 4 mutation controls (S1-S4), each fails on an assertion. Loopback e2e with eps, dashboard and patientapp: 18/18.
+- Operator, at deploy (not done): `scripts/init_db.py` (new table, BEFORE the code); eps key scope via `plans/patientapp_deploy/ops/pa7_invite_scope.sh` (workspace repo); no new `.env` key. `PATIENTAPP_URL` must be set (not verified on the server; blank = the patient stays on sso after the passkey, as before), `EPS_*` as for #1040/#1049.

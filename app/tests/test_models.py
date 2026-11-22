@@ -45,6 +45,8 @@ class TestAllTablesCreated:
         'webauthn_credentials', 'totp_secrets', 'login_lockouts',
         'patient_links', 'patient_link_history', 'patient_invites', 'patient_profiles',
         'patient_link_codes',
+        # #1050: the invite's name and wrong-personnummer count
+        'patient_invite_details',
     ]
 
     def test_all_tables_exist(self, db_session):

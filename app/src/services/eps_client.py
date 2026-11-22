@@ -204,3 +204,47 @@ def self_register(config, *, personnummer, given_name, family_name,
     if header and str(header).strip().lower() != guid:
         raise EpsRefusal(UNAVAILABLE, '201 body and header name different guids')
     return CREATED, guid
+
+
+# --- #1050: the invited patient's personnummer ------------------------------
+#
+#     POST {EPS_BASE_URL}/api/v1/patients/<guid>/identifier-match
+#     Authorization: ApiKey <EPS_API_KEY>     (scope patients:identifier-match)
+#     {"personnummer": "<12 digits>"}
+#
+# eps answers 200 {"match": true|false}, 404 {"error": "Patient not found"},
+# 422 {"error": "invalid_personnummer"}. The stored number never leaves eps;
+# SSO learns yes or no. Anything that is not one of those three, with eps's
+# own body, is UNAVAILABLE (the 404 rule above: another vhost can answer).
+# NO development opt-out: the check is the whole point of the invite page.
+
+INVALID_PERSONNUMMER = 'invalid_personnummer'
+
+
+def identifier_match(config, ips_patient_guid, personnummer):
+    """True / False. Raise EpsRefusal(NOT_CONFIGURED | UNAVAILABLE |
+    PATIENT_NOT_FOUND | INVALID_PERSONNUMMER)."""
+    base = (config.get('EPS_BASE_URL') or '').strip().rstrip('/')
+    key = (config.get('EPS_API_KEY') or '').strip()
+    if not base or not key:
+        raise EpsRefusal(NOT_CONFIGURED, 'EPS_BASE_URL / EPS_API_KEY')
+    try:
+        resp = _http_post(f'{base}/api/v1/patients/{ips_patient_guid}/identifier-match',
+                          {'Authorization': f'ApiKey {key}',
+                           'Accept': 'application/json'},
+                          {'personnummer': personnummer}, TIMEOUT_SECONDS)
+    except requests.RequestException as e:
+        raise EpsRefusal(UNAVAILABLE, type(e).__name__)
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    error = str(data.get('error', '')).lower() if isinstance(data, dict) else ''
+    if resp.status_code == 404 and error == _EPS_NOT_FOUND:
+        raise EpsRefusal(PATIENT_NOT_FOUND)
+    if resp.status_code == 422 and error == INVALID_PERSONNUMMER:
+        raise EpsRefusal(INVALID_PERSONNUMMER)
+    if resp.status_code != 200 or not isinstance(data, dict) \
+            or not isinstance(data.get('match'), bool):
+        raise EpsRefusal(UNAVAILABLE, f'HTTP {resp.status_code}')
+    return data['match']

@@ -210,7 +210,8 @@ def _create(session, *, email, password, personnummer, organisation_guid,
 
 # --- account creation only (the invite path) --------------------------------
 
-def enrol_patient(session, *, email, password, personnummer, organisation_guid, ip=None):
+def enrol_patient(session, *, email, password, personnummer, organisation_guid,
+                  given_name=None, family_name=None, ip=None):
     """Create user (type=patient) + patient row. Raises EnrolmentRefused.
 
     Used where the eps patient is already known (an invite). The personnummer
@@ -234,7 +235,7 @@ def enrol_patient(session, *, email, password, personnummer, organisation_guid, 
         raise EnrolmentRefused(409, 'conflict', ['Personnumret är redan registrerat.'])
     return _create(session, email=email, password=password,
                    personnummer=personnummer, organisation_guid=organisation_guid,
-                   ip=ip)
+                   given_name=given_name, family_name=family_name, ip=ip)
 
 
 # --- self-registration (#1049) ----------------------------------------------

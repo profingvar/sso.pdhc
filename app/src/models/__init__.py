@@ -30,12 +30,14 @@ from src.models.patient_link import (
 )
 # #1049: the name a self-registered patient gave.
 from src.models.patient_profile import PatientProfile
+# #1050: the invited patient's name and the wrong-personnummer counter.
+from src.models.patient_invite_detail import PatientInviteDetail
 
 __all__ = [
     'ReadGrant',
     'WebAuthnCredential', 'TotpSecret', 'LoginLockout',
     'PatientLink', 'PatientLinkHistory', 'PatientInvite', 'PatientLinkCode',
-    'PatientProfile',
+    'PatientProfile', 'PatientInviteDetail',
     'User', 'Patient', 'Professional', 'Organisation', 'OrganisationAudit',
     'UserOrganisation', 'Group', 'Membership', 'GroupProposal',
     'LeaderRequest', 'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',

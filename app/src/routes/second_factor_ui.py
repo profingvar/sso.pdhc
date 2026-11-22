@@ -161,8 +161,14 @@ def _upgrade_after_enrolment(user, method):
     resume = session.pop('sf_resume', None)
     token = _issue(user, sf.new_claim(method))
     session['token'] = token
-    return _destination(token, resume) if (resume or {}).get('next') \
-        else url_for('second_factor_ui.manage')
+    if (resume or {}).get('next'):
+        return _destination(token, resume)
+    # #1050: an accepted invite goes on to the patient app's login (a plain
+    # link from config, never from the request; no token rides on it: the
+    # app's own login fetches one through /login?next=).
+    if (resume or {}).get('after'):
+        return resume['after']
+    return url_for('second_factor_ui.manage')
 
 
 def _may_change_factors(user):
@@ -390,6 +396,14 @@ def patient_invite(token):
     from src.models.organisation import Organisation
     unit = db.query(Organisation).filter_by(guid=invite.care_unit_guid).first()
     unit_name = unit.name if unit else ''
+    detail = pl.invite_detail(db, invite)
+    patient_name = (f'{detail.given_name} {detail.family_name}'
+                    if detail and detail.given_name else '')
+
+    def page(status=200, invalid=False):
+        return render_template('patient_invite.html', invalid=invalid,
+                               unit_name=unit_name, patient_name=patient_name,
+                               email=request.form.get('email', '') if not invalid else ''), status
 
     if request.method == 'POST':
         try:
@@ -404,21 +418,24 @@ def patient_invite(token):
             if e.code == 'conflict':
                 flash('Har du redan ett konto? Logga in och ge din vårdenhet '
                       'en länkkod i stället.', 'warning')
-            return render_template('patient_invite.html', invalid=False,
-                                   unit_name=unit_name), e.status
+            return page(e.status)
         except pl.LinkRefused as e:
-            flash(e.message, 'error')
-            return render_template('patient_invite.html', invalid=True), e.status
+            if e.code != 'invite_not_found':
+                flash(e.message, 'error')
+            return page(e.status, invalid=True)
         # Logged in with the password just chosen; no second factor yet, so
-        # the token carries no claim and the next page is enrolment.
+        # the token carries no claim and the next page is enrolment. After
+        # it (#1050) the patient is sent to the patient app's login.
         session.pop('sf_pending', None)
         session['token'] = _issue(user)
-        session['sf_resume'] = {'next': '', 'state': ''}
+        app_url = (_cfg().get('PATIENTAPP_URL') or '').strip().rstrip('/')
+        session['sf_resume'] = {'next': '', 'state': '',
+                                'after': f'{app_url}/auth/login' if app_url else ''}
         flash('Kontot är skapat och kopplat till din vårdenhet. '
-              'Lägg nu till en andra faktor.', 'success')
+              'Lägg nu till en passkey.', 'success')
         return redirect(url_for('second_factor_ui.manage'))
 
-    return render_template('patient_invite.html', invalid=False, unit_name=unit_name)
+    return page()
 
 
 # --- entrance 2 (patient side) and the care forms ---------------------------

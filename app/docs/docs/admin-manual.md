@@ -350,10 +350,33 @@ There is no SU panel for these yet; use the API with your Bearer token. Every
 link, relink and unlink is kept in the `patient_link_history` table as well as
 in the audit log.
 
-### Patient self-registration (#1049)
+### Patients join by invitation only (#1050)
 
-A patient can now register on their own (`/register-patient`, reached from the
-patient app's **Registrera dig**). SSO asks eps to create the patient at the
+Operator decision 2026-11-22: a patient joins the patient app **only by an
+invitation from their care unit**, made in dashboard.pdhc's **Bjud in
+patient**. That page registers the patient in eps at the chosen unit and calls
+`POST /api/patient-links/invites` with the professional's own bearer, sending
+the patient's name. On `/patient-invite/<token>` the patient must type a
+personnummer that eps confirms belongs to that patient
+(`POST /api/v1/patients/<guid>/identifier-match`, scope
+`patients:identifier-match` on SSO's eps key, operator script
+`plans/patientapp_deploy/ops/pa7_invite_scope.sh`). Five wrong numbers close
+the invite. The name becomes the account's `patient_profiles` row
+(`display_name`).
+
+| audit event | meaning |
+|---|---|
+| `patient_invite_pnr_mismatch` | a wrong personnummer on an invite (`failures`, `closed`); never the number |
+| `patient_invite_pnr_check_failed` | eps could not be asked (`reason`); nothing created, nothing counted |
+
+Self-registration is **closed** by default (`PATIENT_SELF_REGISTRATION`, #1050
+step 1): `/register-patient` and `POST /api/patient/register` answer 403
+`registration_closed`. The rest of this section describes what happens if the
+operator turns it on again.
+
+#### Patient self-registration (#1049), when turned on
+
+A patient could register on their own (`/register-patient`). SSO asks eps to create the patient at the
 chosen unit; when eps does, the account is linked at once
 (`linked_by = self-registration`, the chosen unit). When eps already knew the
 personnummer, the account is created **unlinked** and care links it with the

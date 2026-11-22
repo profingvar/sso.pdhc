@@ -317,6 +317,7 @@ Alembic.
 | `patient_link_codes` | `user_guid`, `code_hash`, `expires_at`, `used_at`, `used_by_user_guid` |
 | `login_lockouts` | one row per user that has failed a password login: `failed_count`, `last_failed_at`, `locked_until` |
 | `patient_profiles` | #1049: one row per self-registered patient: `user_guid` (unique), `given_name`, `family_name` (for the blob's `display_name`). The mobile number is NOT stored in SSO; it goes to eps |
+| `patient_invite_details` | #1050: one row per invite made with a name: `invite_guid` (unique, FK `patient_invites.guid`), `given_name`, `family_name`, `pnr_failures`. A new table, not columns, so `init_db.py` (create_all) is the whole migration |
 
 `patient_links.care_unit_guid` existed from #1040 (invite unit, link-code unit);
 #1049 exposes it in the blob and sets it at self-registration. Rows written
@@ -452,11 +453,22 @@ ips.pdhc) — the `patient_guid` on ServiceRequests and CDR rows. It is `null`
 until care has linked the account. Two entrances, one link step
 (`services/patient_link._set_link`):
 
-1. **Invited by care.** A professional creates a *patient invite* naming the
-   eps patient guid and a care unit. The patient opens the one-time link
-   (`/patient-invite/<token>`, 7 days), enters email, personnummer and a
-   password; the account is created already linked.
-2. **Self-registered** (#1049, contract s7.1). The patient registers
+1. **Invited by care — the ONLY way in since #1050.** A professional uses
+   dashboard.pdhc's **Bjud in patient**, which registers the patient in eps at
+   the unit (`POST /api/v1/patients/register-at-unit`, the professional's
+   bearer) and then creates a *patient invite* here naming the eps patient
+   guid, the unit and the patient's name (`patient_invite_details`). The
+   patient opens the one-time link (`/patient-invite/<token>`, 7 days), sees
+   "Inbjudan från <unit>" and the name, and enters personnummer, email and a
+   password. The personnummer must be the one eps holds: SSO asks eps
+   (`POST /api/v1/patients/<guid>/identifier-match`, scope
+   `patients:identifier-match`) for a yes/no and never reads the number.
+   Five misses close the invite (`patient_invite_details.pnr_failures`), on
+   top of the per-IP limit. The account is created already linked, with
+   `patient_profiles` from the invite's name, and after the passkey the
+   browser goes to `{PATIENTAPP_URL}/auth/login`.
+2. **Self-registered** (#1049, contract s7.1; **closed by default** since
+   #1050 step 1, `PATIENT_SELF_REGISTRATION`). The patient registers
    (`/register-patient`, or `POST /api/patient/register`); SSO asks eps to
    create the patient (`POST /api/v1/patients/self-register`). eps `201` ->
    the account is created AND linked in one transaction (`method`
@@ -526,8 +538,10 @@ cookie. `create_app` refuses to start with the flag set under any other
 is audited (`patient_link_eps_check_skipped`).
 
 !!! warning "What this check still cannot see"
-    - **Accepting an invite does not ask eps again.** The guid was checked when
-      the invite was created, up to seven days earlier.
+    - **Accepting an invite does not re-check the unit listing.** The guid
+      was checked when the invite was created, up to seven days earlier.
+      Since #1050 eps IS asked at acceptance, but only whether the typed
+      personnummer belongs to that guid.
     - **eps's `/clinics` route does not filter ended assignments** (it joins
       `patient_clinic_assignments` without `ended_at IS NULL`), so a patient
       who has LEFT a unit still counts as listed there until eps is changed.
@@ -683,7 +697,7 @@ Downstream services use it to make authorization decisions.
 |-------|---------|
 | `patient_link` | `null` until care has linked the account to a patient. Always present for a patient |
 | `patient_link.care_unit_guid` | #1049: the unit chosen at registration, the invite's unit, or (link code) the unit the patient registered at; `null` for an SU relink without a unit |
-| `display_name` | #1049: `given_name family_name` from self-registration; `null` when SSO has no name (invited and older accounts). Patients only |
+| `display_name` | #1049: `given_name family_name` from self-registration, or (#1050) from the invite's name; `null` when SSO has no name (an invite made without a name, older accounts). Patients only |
 | `second_factor.enrolled` | The ACCOUNT has at least one passkey or a confirmed TOTP secret |
 | `second_factor.verified` | THIS token was issued after a second factor was presented. `false` for a password-only token, even on an enrolled account |
 | `second_factor.method` | `"passkey"` or `"totp"` when verified, else `null` |

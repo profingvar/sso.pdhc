@@ -34,6 +34,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from src.models.patient import Patient
+from src.models.patient_invite_detail import PatientInviteDetail
 from src.models.patient_link import (
     PatientInvite, PatientLink, PatientLinkCode, PatientLinkHistory,
 )
@@ -51,6 +52,9 @@ LINK_CODE_TTL = timedelta(days=7)
 #: No 0/O, 1/I/L, U: the code is read aloud or copied by hand.
 LINK_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'
 LINK_CODE_LENGTH = 8
+#: #1050: wrong personnummer typed on one invite before it closes.
+MAX_PNR_FAILURES = 5
+NAME_MAX = 100
 
 
 class LinkRefused(Exception):
@@ -194,12 +198,34 @@ def _set_link(session, *, user, ips_patient_guid, actor_guid, method,
 
 # --- entrance 1: invited by care --------------------------------------------
 
+def _invite_names(given_name, family_name):
+    """(given, family) both set, or (None, None). One without the other is
+    a 400: the invite page shows the name, and half a name is a wrong one."""
+    given = (given_name or '').strip() if isinstance(given_name, str) else ''
+    family = (family_name or '').strip() if isinstance(family_name, str) else ''
+    if bool(given) != bool(family):
+        raise LinkRefused(400, 'invalid_request',
+                          'given_name and family_name go together')
+    if len(given) > NAME_MAX or len(family) > NAME_MAX:
+        raise LinkRefused(400, 'invalid_request', f'names are at most {NAME_MAX} characters')
+    return (given, family) if given else (None, None)
+
+
+def invite_detail(session, invite):
+    return session.query(PatientInviteDetail).filter_by(invite_guid=invite.guid).first()
+
+
 def create_invite(session, actor, *, ips_patient_guid, care_unit_guid,
-                  secret_key, ip=None):
+                  secret_key, given_name=None, family_name=None, ip=None):
     """Returns (invite row, token). The token is returned ONCE and never
-    stored; only its keyed hash is."""
+    stored; only its keyed hash is.
+
+    #1050: `given_name`/`family_name` (optional, together) are kept beside
+    the invite in `patient_invite_details`, shown on the invite page and
+    stored as the account's profile when the patient accepts."""
     _require_linker(actor)
     ips_patient_guid = normalise_guid(ips_patient_guid)
+    given_name, family_name = _invite_names(given_name, family_name)
     care_unit_guid = (care_unit_guid or '').strip()
     if not care_unit_guid:
         units = actor_units(session, actor)
@@ -224,6 +250,9 @@ def create_invite(session, actor, *, ips_patient_guid, care_unit_guid,
         ips_patient_guid=ips_patient_guid, care_unit_guid=care_unit_guid,
         created_by_user_guid=actor.guid, expires_at=_utcnow() + INVITE_TTL)
     session.add(invite)
+    session.flush()
+    session.add(PatientInviteDetail(invite_guid=invite.guid, given_name=given_name,
+                                    family_name=family_name, pnr_failures=0))
     session.flush()
     audit('patient_invite_create', user_guid=actor.guid,
           detail={'invite_guid': invite.guid, 'ips_patient_guid': ips_patient_guid,
@@ -258,7 +287,59 @@ def find_valid_invite(session, token, secret_key):
         return None
     if _aware(invite.expires_at) <= _utcnow():
         return None
+    detail = invite_detail(session, invite)
+    if detail is not None and (detail.pnr_failures or 0) >= MAX_PNR_FAILURES:
+        return None
     return invite
+
+
+PNR_MISMATCH_TEXT = ('Personnumret stämmer inte med inbjudan. Kontrollera '
+                     'siffrorna och försök igen.')
+TRY_LATER_TEXT = 'Det gick inte att kontrollera uppgifterna just nu. Försök igen om en stund.'
+
+
+def check_invite_personnummer(session, invite, personnummer, ip=None):
+    """#1050: the personnummer typed on the invite page must be the eps
+    patient's. Raises EnrolmentRefused (a plain form error) otherwise.
+
+    Order: shape and the pilot's synthetic rule first (no eps call for a
+    number that could never be accepted), then eps. A mismatch is counted on
+    the invite; at MAX_PNR_FAILURES the invite closes. Audited WITHOUT the
+    number. Commits the counter itself, because the caller's request ends in
+    an error and must not roll the count back."""
+    from src.services.patient_enrolment import EnrolmentRefused, _check_personnummer
+    errors = []
+    normalised = _check_personnummer(personnummer, current_app.config, errors)
+    if errors:
+        raise EnrolmentRefused(400, 'validation_error', errors)
+    try:
+        match = eps_client.identifier_match(current_app.config,
+                                            invite.ips_patient_guid, normalised)
+    except eps_client.EpsRefusal as e:
+        audit('patient_invite_pnr_check_failed',
+              detail={'invite_guid': invite.guid, 'reason': e.code,
+                      'eps_detail': e.detail}, ip=ip)
+        if e.code == eps_client.INVALID_PERSONNUMMER:
+            match = False
+        else:
+            raise EnrolmentRefused(503, e.code, [TRY_LATER_TEXT])
+    if match:
+        return normalised
+    detail = invite_detail(session, invite)
+    if detail is None:
+        detail = PatientInviteDetail(invite_guid=invite.guid, pnr_failures=0)
+        session.add(detail)
+    detail.pnr_failures = (detail.pnr_failures or 0) + 1
+    closed = detail.pnr_failures >= MAX_PNR_FAILURES
+    session.commit()
+    audit('patient_invite_pnr_mismatch',
+          detail={'invite_guid': invite.guid, 'failures': detail.pnr_failures,
+                  'closed': closed},
+          ip=ip)
+    if closed:
+        raise LinkRefused(404, 'invite_not_found',
+                          'This invite is not valid (used, expired or revoked)')
+    raise EnrolmentRefused(400, 'personnummer_mismatch', [PNR_MISMATCH_TEXT])
 
 
 def accept_invite(session, token, *, email, password, personnummer,
@@ -267,7 +348,11 @@ def accept_invite(session, token, *, email, password, personnummer,
 
     Account creation is `patient_enrolment.enrol_patient` — the same rules as
     self-registration, so there is still one implementation of them. It raises
-    EnrolmentRefused (caller handles it); this raises LinkRefused."""
+    EnrolmentRefused (caller handles it); this raises LinkRefused.
+
+    #1050: the personnummer must equal the eps patient's
+    (`check_invite_personnummer`), and the name care gave on the invite
+    becomes the account's `patient_profiles` row (the blob's display_name)."""
     from src.services.patient_enrolment import enrol_patient
     invite = find_valid_invite(session, token, secret_key)
     if invite is None:
@@ -277,9 +362,13 @@ def accept_invite(session, token, *, email, password, personnummer,
             ips_patient_guid=invite.ips_patient_guid).first() is not None:
         raise LinkRefused(409, 'patient_already_linked',
                           'This patient is already linked to an account')
+    personnummer = check_invite_personnummer(session, invite, personnummer, ip=ip)
+    detail = invite_detail(session, invite)
     user, _patient = enrol_patient(
         session, email=email, password=password, personnummer=personnummer,
-        organisation_guid=invite.care_unit_guid, ip=ip)
+        organisation_guid=invite.care_unit_guid,
+        given_name=detail.given_name if detail else None,
+        family_name=detail.family_name if detail else None, ip=ip)
     _set_link(session, user=user, ips_patient_guid=invite.ips_patient_guid,
               actor_guid=invite.created_by_user_guid, method='invite',
               care_unit_guid=invite.care_unit_guid, ip=ip)

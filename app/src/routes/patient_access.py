@@ -86,13 +86,18 @@ def create_invite():
             get_db(), g.current_user,
             ips_patient_guid=data.get('ips_patient_guid'),
             care_unit_guid=data.get('care_unit_guid'),
+            given_name=data.get('given_name'), family_name=data.get('family_name'),
             secret_key=_secret(), ip=request.remote_addr)
     except pl.LinkRefused as e:
         return _refused(e)
+    detail = pl.invite_detail(get_db(), invite)
     return jsonify({
         "invite_guid": invite.guid,
         "ips_patient_guid": invite.ips_patient_guid,
         "care_unit_guid": invite.care_unit_guid,
+        # #1050: as given (null when the caller sent no name).
+        "given_name": detail.given_name if detail else None,
+        "family_name": detail.family_name if detail else None,
         "expires_at": pl._iso(invite.expires_at),
         # Shown ONCE. Only a keyed hash of the token is stored.
         "invite_url": invite_url(token),
