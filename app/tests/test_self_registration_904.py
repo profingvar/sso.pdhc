@@ -109,7 +109,7 @@ class TestPersonnummerIsDeliberatelyNotChecksummed:
             self, client, org_guid):
         """NOT a lax test. A Luhn check here would reject every synthetic
         patient the platform creates on purpose."""
-        # 200202021234 would have been the obvious pick and it HAS a valid
+        # 191212121212 would have been the obvious pick and it HAS a valid
         # checksum — the premise guard below caught that, which is what a
         # premise guard is for.
         pnr = '200303031234'
@@ -269,7 +269,7 @@ class TestTheTwoEnrolmentPaths:
             r = client.post('/api/patient/register', json={
                 'email': f'rl-{i}-{uuid.uuid4().hex[:6]}@example.test',
                 'password': 'password123',
-                'personnummer': '201010101234',
+                'personnummer': '191212121212',
                 'organisation_guid': org_guid,
             })
             codes.append(r.status_code)
@@ -296,7 +296,7 @@ class TestTheEnumerationOracleIsGone:
     assertion is inverted, not deleted."""
 
     def test_a_duplicate_personnummer_gets_the_same_answer(self, client, org_guid):
-        pnr = '199909091235'   # 199909091234 has a VALID check digit
+        pnr = '199909091235'   # 191212121212 has a VALID check digit
         assert not _luhn_ok(pnr)
         first = client.post('/api/patient/register', json={
             'given_name': 'A', 'family_name': 'A',

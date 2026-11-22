@@ -181,7 +181,7 @@ class TestPatientRegister:
 
     def test_register_password_too_short(self, client, seed_data):
         resp = _reg(client, email='new5@test.com', password='short',
-                    personnummer='200401011234', organisation_guid=seed_data['org_guid'])
+                    personnummer='191212121212', organisation_guid=seed_data['org_guid'])
         assert resp.status_code == 400
 
     def test_register_missing_fields(self, client, seed_data):
