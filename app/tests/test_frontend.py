@@ -195,6 +195,29 @@ class TestLoginPage:
         assert 'http://localhost:9000/callback' in resp.headers['Location']
         assert 'token=' in resp.headers['Location']
 
+    @pytest.mark.parametrize('target', [
+        'https://evil.example/collect',
+        'http://localhost:9000.evil.example/callback',
+        '//evil.example/callback',
+    ])
+    def test_auto_redirect_refuses_an_unlisted_url(self, client, app, target):
+        """A logged-in user opening /login?next=<anywhere> must not be sent
+        there with a token: the allowlist applies to this branch too."""
+        guid, token = _make_professional(app)
+        _login_session(client, app, token)
+        resp = client.get(f'/login?next={target}&state=xyz', follow_redirects=False)
+        assert resp.status_code == 302
+        assert 'token=' not in resp.headers['Location']
+        assert 'evil.example' not in resp.headers['Location']
+
+    def test_auto_redirect_allows_a_listed_origin(self, client, app):
+        guid, token = _make_professional(app)
+        _login_session(client, app, token)
+        resp = client.get('/login?next=http://localhost:9000/other/callback',
+                          follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers['Location'].startswith('http://localhost:9000/other/callback?token=')
+
 
 # ============================================================
 # 9.c — Dashboard

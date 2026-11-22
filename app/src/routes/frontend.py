@@ -241,6 +241,8 @@ def login_page():
         # link to /login?next=<anywhere> opened by a logged-in user handed a
         # valid token to that address. Same rule on both branches now.
         if not callback_allowed(next_url):
+            audit('login_redirect_refused', detail={'reason': 'callback_not_allowlisted'},
+                  ip=request.remote_addr)
             flash('Callback URL not in allowlist.', 'warning')
             return redirect(url_for('frontend.dashboard'))
         secret = current_app.config.get('SECRET_KEY', '')
