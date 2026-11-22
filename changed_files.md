@@ -593,3 +593,14 @@ Survey: sso_app is the only service with a FILE audit log; the rest keep audit i
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/architecture.md, api-reference.md, admin-manual.md, deployment-guide.md, user-guide.md
 - /Users/martiningvar/T7_sidewinder/sso.pdhc/progress.md, changed_files.md, newtask.txt
 - /Users/martiningvar/T7_sidewinder/plans/patient_app_contract.md — two more `[sso]` deviation lines
+
+## 2026-11-22 — #1040: login rate limit + password lockout
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/models/login_lockout.py (NEW), /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/models/__init__.py
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/login_lockout.py (NEW) — 5 failures / 15 minutes, injected clock, unlock
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/auth_service.py — authenticate_user: lockout, bcrypt for unknown email and locked account
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/frontend.py — POST /login split into _login_post with @rate_limit(20/60s)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/routes/admin.py — GET /api/admin/login-locks, POST /api/admin/users/<guid>/unlock-login
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/scripts/unlock_login.py (NEW)
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_login_lockout_1040.py (NEW), /Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_models.py
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/user-guide.md, admin-manual.md, api-reference.md, architecture.md, deployment-guide.md
+- /Users/martiningvar/T7_sidewinder/sso.pdhc/progress.md, changed_files.md

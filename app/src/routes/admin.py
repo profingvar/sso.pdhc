@@ -1564,3 +1564,41 @@ def deactivate_user(user_guid):
     audit('user_deactivate', user_guid=caller.guid,
           detail={'person_guid': user_guid}, ip=request.remote_addr)
     return jsonify({"user_guid": user_guid, "status": "pending"}), 200
+
+
+# --- #1040: password-login lockout ------------------------------------------
+
+@admin_bp.route('/login-locks', methods=['GET'])
+@require_auth
+@require_su
+def list_login_locks():
+    """GET /api/admin/login-locks — accounts whose password login is locked
+    right now (5 wrong passwords -> 15 minutes; services/login_lockout.py)."""
+    session = get_db()
+    from src.models.user import User
+    from src.services import login_lockout
+    out = []
+    for user_guid, until in login_lockout.currently_locked(session):
+        u = session.query(User).filter_by(guid=user_guid).first()
+        out.append({'user_guid': user_guid, 'email': u.email if u else None,
+                    'locked_until': until.isoformat()})
+    return jsonify(out), 200
+
+
+@admin_bp.route('/users/<user_guid>/unlock-login', methods=['POST'])
+@require_auth
+@require_su
+def unlock_login(user_guid):
+    """POST /api/admin/users/<user_guid>/unlock-login — end a password-login
+    lock now and clear the failure counter. The lock also ends by itself."""
+    session = get_db()
+    from src.models.user import User
+    from src.services import login_lockout
+    target = session.query(User).filter_by(guid=user_guid).first()
+    if target is None:
+        return jsonify({"error": "not_found", "message": "User not found"}), 404
+    was_locked = login_lockout.unlock(session, user_guid)
+    audit('login_unlock', user_guid=g.current_user.guid,
+          detail={'target_guid': user_guid, 'email': target.email,
+                  'was_locked': was_locked}, ip=request.remote_addr)
+    return jsonify({"user_guid": user_guid, "was_locked": was_locked}), 200

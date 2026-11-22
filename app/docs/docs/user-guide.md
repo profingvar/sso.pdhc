@@ -17,6 +17,28 @@ an SU admin has granted you, and whether your account has been **activated**.
 If you arrived from another service (SSO handshake), you will be automatically
 redirected back after login.
 
+### If you cannot log in: the 15-minute lock
+
+After **five wrong passwords in a row**, password login for that account is
+locked for **15 minutes**. This applies to everyone: patients, professionals
+and administrators.
+
+- **What you see:** the same message as for any failed login, *"Invalid email
+  or password"* — also when you now type the right password. The page does not
+  say that the account is locked. That is deliberate: it must not tell a
+  stranger which email addresses have accounts.
+- **What to do:** wait 15 minutes and try again with the right password. The
+  lock ends by itself; trying again during the wait does not make it longer.
+- **In a hurry:** ask an SU admin to unlock you.
+- A successful login clears the count, and wrong attempts more than 15 minutes
+  apart do not add up.
+- If you see *"Too many requests"* instead, too many logins came from your
+  network address within a minute. Wait a minute.
+
+Om du är patient: efter fem felaktiga lösenord i rad är inloggningen låst i
+15 minuter. Du ser bara "Invalid email or password", även med rätt lösenord.
+Vänta 15 minuter och försök igen, eller kontakta din vårdenhet.
+
 ### How your access is decided
 
 Three independent things combine to decide what you can do in each PDHC

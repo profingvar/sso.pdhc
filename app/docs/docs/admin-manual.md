@@ -167,6 +167,38 @@ Use when a user has forgotten their password, a credential has leaked, or compli
 !!! note "This does not kill existing tokens"
     The user's existing JWTs are not invalidated — they just hit a forced redirect on every call. If you also want to terminate every active session (e.g. after credential theft), call **Flush Sessions** immediately after.
 
+### Unlocking a Locked-Out User (#1040)
+
+Five wrong passwords in a row lock **password login** for that account for 15
+minutes, for every user type and at both login doors (the web form and
+`POST /api/auth/login`). The user is not told: they see "Invalid email or
+password" even with the right password. So a user who says "my password
+stopped working" may simply be locked.
+
+| task | how |
+|---|---|
+| See who is locked right now | `GET /api/admin/login-locks` → `[{user_guid, email, locked_until}]` |
+| Unlock now | `POST /api/admin/users/<user_guid>/unlock-login` → `{user_guid, was_locked}`. Clears the counter too. Audited as `login_unlock` |
+| Do nothing | The lock ends by itself at `locked_until` |
+
+- The lock is **time-based only**. It never becomes permanent and never grows;
+  attempts made while locked are not counted and do not extend it.
+- It cannot be switched off per user. Somebody who knows an email address can
+  re-lock that account every 15 minutes with five wrong passwords — including
+  an SU admin's. If that happens, the audit log shows it (`login_locked`,
+  `login_refused_locked`, with the address), and the address can be blocked at
+  the reverse proxy.
+- **If the only SU admin is locked out** and holds no open session: wait 15
+  minutes, or the operator runs `python scripts/unlock_login.py <email>` in
+  the app container.
+- This is not the authenticator-app lock on a patient's second step (five
+  wrong codes, 15 minutes), which is separate and has no unlock; a passkey
+  still works during it.
+
+There is no SU panel for this yet; use the API with your Bearer token.
+
+---
+
 ### Flushing User Sessions (#44)
 
 Use when you need to invalidate **every** active JWT for a user in one operation — typically after a credential compromise, lost device, or role change.
@@ -569,6 +601,9 @@ All admin actions are logged to structured audit files in `LOG_DIR`:
 - Direct phase grants and revocations (#46)
 - Affiliation create/delete, user activate/deactivate (S9, #411)
 - External partner register / rotate / suspend / reactivate / revoke
+- Login lockout (#1040): `login_locked` (the fifth wrong password; account,
+  `locked_until`), `login_refused_locked` (an attempt during the lock, right
+  password or not), `login_unlock` (SU, target, whether it was locked)
 - Patient app (#1040): `patient_invite_create` / `_revoke` / `_accept` / `_refused`,
   `patient_link_code_create`, `patient_link` (who, which account, which patient,
   method), `patient_link_refused` (with the real reason, which the caller is not

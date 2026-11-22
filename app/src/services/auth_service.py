@@ -27,13 +27,60 @@ def hash_password(plain_password):
     ).decode('utf-8')
 
 
+_DUMMY_HASH = None
+
+
+def _dummy_hash():
+    """A real bcrypt hash of nothing in particular, made once per process. An
+    unknown email is checked against it so that "no such account" costs the
+    same time as "wrong password"."""
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = hash_password('no-such-account')
+    return _DUMMY_HASH
+
+
+def _audit_login(event, user, detail):
+    from flask import has_request_context, request
+    from src.services.audit_log import audit
+    audit(event, user_guid=user.guid, detail=dict(detail, email=user.email),
+          ip=request.remote_addr if has_request_context() else None)
+
+
 def authenticate_user(email, password, session):
-    """Authenticate by email + password. Returns User or None."""
+    """Authenticate by email + password. Returns User or None.
+
+    THE one place a password login is decided (#1040): the HTML form at
+    /login and POST /api/auth/login both call this, so the lockout below
+    cannot differ between them.
+
+    None means "not let in" and deliberately says no more. An unknown email, a
+    wrong password and a locked account all return None, and all three do the
+    bcrypt work, so a caller cannot tell them apart by answer or by timing.
+    WHY it was None is in the audit log (`login_locked`,
+    `login_refused_locked`) and visible to an SU; see services/login_lockout.
+    """
+    from src.services import login_lockout
     user = session.query(User).filter_by(email=email).first()
     if user is None:
+        verify_password(password, _dummy_hash())
         return None
-    if not verify_password(password, user.password_hash):
+    until = login_lockout.locked_until(session, user.guid)
+    password_ok = verify_password(password, user.password_hash)
+    if until is not None:
+        # Locked: refused even with the right password. Not counted and not
+        # extended — the lock ends when it was set to end.
+        _audit_login('login_refused_locked', user,
+                     {'locked_until': until.isoformat()})
         return None
+    if not password_ok:
+        new_lock = login_lockout.record_failure(session, user.guid)
+        if new_lock is not None:
+            _audit_login('login_locked', user,
+                         {'locked_until': new_lock.isoformat(),
+                          'after_failures': login_lockout.MAX_FAILURES})
+        return None
+    login_lockout.record_success(session, user.guid)
     return user
 
 

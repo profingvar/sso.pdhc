@@ -315,6 +315,7 @@ Alembic.
 | `patient_link_history` | append-only: `event`, account, patient, previous patient, actor, method, reason, `at` |
 | `patient_invites` | `token_hash`, `ips_patient_guid`, `care_unit_guid`, creator, `expires_at`, `used_at`, `revoked_at` |
 | `patient_link_codes` | `user_guid`, `code_hash`, `expires_at`, `used_at`, `used_by_user_guid` |
+| `login_lockouts` | one row per user that has failed a password login: `failed_count`, `last_failed_at`, `locked_until` |
 
 ## Authentication Flow
 
@@ -337,6 +338,34 @@ sequenceDiagram
     S->>DB: build_access_blob(user, session, session_id=sid)
     S-->>C: Access blob
 ```
+
+### Password lockout (#1040)
+
+`auth_service.authenticate_user` is the one place a password login is decided;
+the HTML form and `POST /api/auth/login` both call it. Since #1040 it also
+holds the lockout (`services/login_lockout.py`, table `login_lockouts`):
+
+| rule | value |
+|---|---|
+| lock after | 5 consecutive wrong passwords |
+| lock lasts | 15 minutes, then ends by itself |
+| counter resets | on a successful login; a failure older than 15 minutes no longer counts |
+| while locked | the right password is refused; attempts are neither counted nor extend the lock |
+| escalation | none. Time-based only, never permanent — also for an SU admin |
+| stored | in the database (two gunicorn workers; an in-memory counter would double the attempts and forget them at restart) |
+
+**No enumeration.** `authenticate_user` returns `None` for an unknown email, a
+wrong password and a locked account alike, so both doors give the same status
+and message for all three; and bcrypt is run in all three (against a dummy
+hash for an unknown email), so they cost the same. An unknown email creates
+no row. The reason is in the audit log only: `login_locked`,
+`login_refused_locked`. An SU sees and ends locks via `/api/admin/login-locks`
+and `/api/admin/users/<guid>/unlock-login`.
+
+**What it does not stop:** re-locking a known account every 15 minutes with
+five wrong passwords. That is inherent in a lock keyed on the account.
+
+The TOTP lock on the second step (below) is separate and unchanged.
 
 ### Patient login: password, then a second factor (#1040)
 
@@ -944,6 +973,14 @@ Each request passes through these layers in order:
 
 1. **CORS** — validates the `Origin` header against `ALLOWED_ORIGINS`.
 2. **Rate Limiter** — in-memory per-IP limits (configurable per endpoint).
+   Since #1040 also on the HTML `POST /login` (20/min, as `/api/auth/login`;
+   loading the page is not counted). Three properties to know before trusting
+   the number: the client is `request.remote_addr`, which in production
+   `ProxyFix(x_for=1)` takes from the last `X-Forwarded-For` entry, so anything
+   in front of the reverse proxy collapses its clients into one address; the
+   log is per gunicorn worker, so with two workers the enforced limit is about
+   double and it resets at restart; and it is ONE allowance per address across
+   all rate-limited routes, not one per route.
 3. **CSRF** — Flask-WTF token validation on form POST (JSON API routes exempt).
 4. **Auth Middleware** — JWT decode, `jti` revocation check,
    `iat < user.token_revocation_epoch` check (#44), and user loading into

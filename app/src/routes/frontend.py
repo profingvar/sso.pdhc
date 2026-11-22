@@ -260,52 +260,74 @@ def login_page():
         return redirect(url_for('frontend.dashboard'))
 
     if request.method == 'POST':
-        email = request.form.get('email', '').strip()
-        password = request.form.get('password', '')
-        next_url = request.form.get('next', '') or next_url
-        state = request.form.get('state', '') or state
-
-        db = get_db()
-        user = authenticate_user(email, password, db)
-        if user is None:
-            audit('login_fail', detail={'reason': 'invalid_credentials', 'email': email},
-                  ip=request.remote_addr)
-            flash('Invalid email or password.', 'error')
-            return render_template('login.html', next_url=next_url, state=state)
-
-        if user.user_type == 'patient':
-            # #1040: the password is only the first factor for a patient. No
-            # token is issued here when a second factor is enrolled; see
-            # routes/second_factor_ui.py for the rule.
-            from src.routes.second_factor_ui import begin_patient_login
-            return begin_patient_login(user, next_url, state, email=email)
-
-        secret = current_app.config.get('SECRET_KEY', '')
-        expiry_hours = current_app.config.get('SESSION_EXPIRY_HOURS', 24)
-        token = issue_token(user.guid, secret, expiry_hours=expiry_hours)
-        session['token'] = token
-
-        audit('login_success', user_guid=user.guid, detail={'email': email},
-              ip=request.remote_addr)
-
-        # SSO handshake redirect
-        if next_url:
-            allowed_urls = current_app.config.get('ALLOWED_CALLBACK_URLS', [])
-            allowed_origins = current_app.config.get('ALLOWED_ORIGINS', [])
-            from urllib.parse import urlparse, urlencode
-            parsed = urlparse(next_url)
-            origin = f"{parsed.scheme}://{parsed.netloc}"
-            if next_url in allowed_urls or origin in allowed_origins:
-                params = {'token': token}
-                if state:
-                    params['state'] = state
-                return redirect(f"{next_url}?{urlencode(params)}")
-            else:
-                flash('Callback URL not in allowlist.', 'warning')
-
-        return redirect(url_for('frontend.dashboard'))
+        return _login_post(next_url, state)
 
     return render_template('login.html', next_url=next_url, state=state)
+
+
+# #1040: the HTML login had NO rate limit while POST /api/auth/login had
+# 20/min — the door with a UI was the less protected one (the #904 shape).
+# Same decorator, same numbers. Only the POST is counted: loading the page
+# must not use up a person's attempts.
+#
+# What the number means, measured in src/middleware/rate_limit.py and app.py:
+#   * the client is `request.remote_addr`. In production ProxyFix(x_for=1)
+#     sets it from the LAST X-Forwarded-For entry, i.e. what the reverse proxy
+#     saw. If something else sits in front of that proxy, every client behind
+#     it shares one address and one allowance.
+#   * the log is in memory, PER gunicorn worker. With `--workers 2` the
+#     enforced limit is about 40/min, not 20, and it resets on restart.
+#   * it is one allowance per address across ALL rate-limited routes, not per
+#     route.
+# So this slows guessing from one address. The control that survives two
+# workers and many addresses is the account lockout in authenticate_user.
+@rate_limit(max_requests=20, window_seconds=60)
+def _login_post(next_url, state):
+    """The POST half of /login."""
+    email = request.form.get('email', '').strip()
+    password = request.form.get('password', '')
+    next_url = request.form.get('next', '') or next_url
+    state = request.form.get('state', '') or state
+
+    db = get_db()
+    user = authenticate_user(email, password, db)
+    if user is None:
+        audit('login_fail', detail={'reason': 'invalid_credentials', 'email': email},
+              ip=request.remote_addr)
+        flash('Invalid email or password.', 'error')
+        return render_template('login.html', next_url=next_url, state=state)
+
+    if user.user_type == 'patient':
+        # #1040: the password is only the first factor for a patient. No
+        # token is issued here when a second factor is enrolled; see
+        # routes/second_factor_ui.py for the rule.
+        from src.routes.second_factor_ui import begin_patient_login
+        return begin_patient_login(user, next_url, state, email=email)
+
+    secret = current_app.config.get('SECRET_KEY', '')
+    expiry_hours = current_app.config.get('SESSION_EXPIRY_HOURS', 24)
+    token = issue_token(user.guid, secret, expiry_hours=expiry_hours)
+    session['token'] = token
+
+    audit('login_success', user_guid=user.guid, detail={'email': email},
+          ip=request.remote_addr)
+
+    # SSO handshake redirect
+    if next_url:
+        allowed_urls = current_app.config.get('ALLOWED_CALLBACK_URLS', [])
+        allowed_origins = current_app.config.get('ALLOWED_ORIGINS', [])
+        from urllib.parse import urlparse, urlencode
+        parsed = urlparse(next_url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        if next_url in allowed_urls or origin in allowed_origins:
+            params = {'token': token}
+            if state:
+                params['state'] = state
+            return redirect(f"{next_url}?{urlencode(params)}")
+        else:
+            flash('Callback URL not in allowlist.', 'warning')
+
+    return redirect(url_for('frontend.dashboard'))
 
 
 def _flush_user_sessions(db, user_guid):

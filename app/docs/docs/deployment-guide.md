@@ -295,6 +295,7 @@ After deploying to a new environment:
 - [ ] Spot-check a downstream `/me/service` call returns `must_change_password` and `effective_phases` fields in the blob
 - [ ] `effective_phases` sourced only from `UserPhase` (#57) — verified via `scripts/phases_migration_report.py`, with SU having explicitly granted phases to every user who should retain access after the cutover
 - [ ] Schema includes the six #1040 tables (`webauthn_credentials`, `totp_secrets`, `patient_links`, `patient_link_history`, `patient_invites`, `patient_link_codes`) — created by `init_db.py`
+- [ ] Schema includes `login_lockouts` (#1040) — created by `init_db.py`. No `.env` variable: 5 failures / 15 minutes are constants in `src/services/login_lockout.py`
 - [ ] `EPS_BASE_URL` / `EPS_API_KEY` set; an invite for a made-up patient guid answers `patient_not_found`, not `eps_unavailable` (#1040)
 - [ ] `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` set; a patient can add a passkey at `/second-factor` (#1040)
 - [ ] Access-request approval on this deployment no longer auto-creates `UserPhase` rows — confirm by test-approving a request and checking the response includes `requested_phases_pending_su_grant` (#57)
@@ -324,6 +325,20 @@ Back up these files:
 - `logs/` — audit logs (for compliance)
 
 ---
+
+## Login rate limit and lockout (#1040)
+
+Nothing to configure. After deploy:
+
+- `init_db.py` creates the `login_lockouts` table (additive). Without the
+  table every password login fails with a 500, so run it before sending
+  traffic.
+- The rate limit on `/login` counts per client address as the app sees it.
+  Confirm the reverse proxy sets `X-Forwarded-For`; if it does not, or if
+  another proxy sits in front, all users share one address and 20 logins a
+  minute in total (about 40 with two workers) will produce `429` for everyone.
+- Emergency unlock when no SU can log in: `python scripts/unlock_login.py
+  <email>` in the app container.
 
 ## Log Rotation
 

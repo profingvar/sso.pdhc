@@ -1039,7 +1039,7 @@ Built against `~/T7_sidewinder/plans/patient_app_contract.md` s1. LOCAL ONLY: no
 - `scripts/test_endpoints.sh` got five no-auth probes; the script was not run.
 
 ### Known gaps, not fixed
-- `/login` (the HTML form) has no rate limit and there is no account lockout on wrong PASSWORDS (the JSON `/api/auth/login` has 20/min). TOTP has its own lockout; the password step does not.
+- ~~`/login` (the HTML form) has no rate limit and there is no account lockout on wrong passwords.~~ Closed, see "login rate limit and lockout" below.
 - ~~SSO cannot check that an eps patient guid exists or is listed at the unit.~~ Closed by the eps check, next section.
 - An account with no factor enrols one with the password alone (trust on first use); an SU reset re-opens that.
 - No recovery codes: a lost device is an SU reset.
@@ -1077,3 +1077,27 @@ Read in `ips.pdhc/gateway/app/models/clinic.py`: a clinic has its own `guid` (ep
 - No call was made to a real eps. The response shapes and the 404 body are read from the eps source in the local `ips.pdhc` checkout, which I did not compare with what is deployed.
 - That `https://eps.pdhc.se` is the right production `EPS_BASE_URL` (taken from the workspace handbook's rename note).
 - Accepting an invite does not re-ask eps (the guid was checked at invite creation, up to 7 days earlier). Deliberate; say if it should.
+
+## 2026-11-22 — #1040: login rate limit and password lockout, all user types (operator decision, on top of a51fa2f)
+
+LOCAL ONLY, not deployed.
+
+### What exists now
+- **Rate limit on the HTML `POST /login`**: the existing `rate_limit` decorator, 20/min, same as `/api/auth/login`. Only the POST counts; loading the page is free. What the mechanism actually does (read in `middleware/rate_limit.py` and `app.py`): the client is `request.remote_addr`; in production `ProxyFix(x_for=1)` sets it from the last `X-Forwarded-For` entry, i.e. what nginx saw; the log is in memory per gunicorn worker (two workers → about 40/min, reset at restart); and it is ONE allowance per address across all rate-limited routes. The caveat is written at the decorator line in `routes/frontend.py`.
+- **Lockout in ONE place**, `auth_service.authenticate_user`, which both doors call: 5 consecutive wrong passwords lock password login for the account for 15 minutes; success resets; a failure older than 15 minutes no longer counts. State in the new table `login_lockouts` (database, not memory), created by `init_db.py`.
+- **No enumeration**: unknown email, wrong password and locked account all return `None` from `authenticate_user`, so both doors answer identically; bcrypt is run in all three (dummy hash for an unknown email — it was NOT before: an unknown email returned without hashing, a timing oracle). Unknown emails create no row.
+- **Visible to SU and audited**: `login_locked`, `login_refused_locked`; `GET /api/admin/login-locks`; `POST /api/admin/users/<guid>/unlock-login` (audited `login_unlock`). `scripts/unlock_login.py <email>` for when no SU can log in.
+- **Not usable for a permanent lockout — what I chose**: time-based only, no escalation, and attempts made while locked are neither counted nor extend the lock, so hammering a locked account does not keep it locked. What remains, stated: an attacker who knows an address can re-lock it every 15 minutes with five wrong passwords, an SU's included. That is inherent in an account-keyed lock.
+- The TOTP lock on the second step is unchanged.
+
+### Tests
+- New `app/tests/test_login_lockout_1040.py`, 9 tests through `POST /login` and `POST /api/auth/login`, clock injected (`login_lockout._now`), no sleeps, audit recorded not written.
+- Suite: 550 before → **559 passed**, 0 failed (550 + 9; `test_models.py` table list +1).
+- Controls: 16 single-point reverts, all failing on an assertion.
+- "Comparable timing" is asserted by COUNTING bcrypt calls (one per attempt in every case), not by measuring time.
+- The indistinguishability of the RESPONSE has no revert of its own: it follows from `authenticate_user` returning `None` in all three cases; the test compares the full API body and the full HTML page (CSRF token masked) across unknown / wrong / locked-wrong / locked-right.
+
+### Not verified
+- How the client address looks in production: I did not read the nginx config (operator-owned), so whether `X-Forwarded-For` is set, and whether anything sits in front of nginx, is unknown. If clients collapse into one address the rate limit will 429 everybody.
+- `init_db.py` / the new table on Postgres. NOTE the ordering risk: once this code is deployed, every password login reads `login_lockouts`; if the table is missing, login fails with a 500. Run `init_db.py` before traffic.
+- `scripts/unlock_login.py` was not run; the function it calls is tested.

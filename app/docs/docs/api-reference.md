@@ -100,7 +100,7 @@ Redirects to `{next}?token={JWT}&state={state}`
 |------|-------|-------------|
 | 400 | `invalid_request` | Missing email or password |
 | 400 | `invalid_redirect` | `next` URL not in allowlist |
-| 401 | `authentication_failed` | Wrong email or password |
+| 401 | `authentication_failed` | Wrong email or password — **and** an unknown email, **and** an account locked after five wrong passwords (#1040), even when the password is now right. The three are the same answer on purpose |
 
 ---
 
@@ -681,6 +681,15 @@ If `temporary_password` is omitted the server generates one and returns it in th
 **Errors:** `404` user not found, `400` temporary password < 8 chars
 
 ---
+
+### `GET /api/admin/login-locks` · `POST /api/admin/users/<user_guid>/unlock-login` *(#1040)*
+
+SU admin only. Five consecutive wrong passwords lock password login for an
+account for 15 minutes (both the web form and `POST /api/auth/login`; state in
+the `login_lockouts` table).
+
+- `GET /api/admin/login-locks` → `200 [{"user_guid": "…", "email": "…", "locked_until": "…"}]`, accounts locked right now.
+- `POST /api/admin/users/<user_guid>/unlock-login` → `200 {"user_guid": "…", "was_locked": true}`. Ends the lock and clears the failure counter. `404` unknown user. Audited (`login_unlock`).
 
 ### `POST /api/admin/users/<user_guid>/flush-sessions` *(#44)*
 
