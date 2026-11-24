@@ -319,6 +319,28 @@ Alembic.
 | `patient_profiles` | #1049: one row per self-registered patient: `user_guid` (unique), `given_name`, `family_name` (for the blob's `display_name`). The mobile number is NOT stored in SSO; it goes to eps |
 | `patient_invite_details` | #1050: one row per invite made with a name: `invite_guid` (unique, FK `patient_invites.guid`), `given_name`, `family_name`, `pnr_failures`. A new table, not columns, so `init_db.py` (create_all) is the whole migration |
 
+### Professional qualification (#1054)
+
+| table | holds |
+|---|---|
+| `professional_qualifications` | at most one per professional: `professional_guid` (unique, FK `professionals.guid`, deleted with the professional), `hsa_id` (unique when set, upper-case), `legitimation` (one of Socialstyrelsen's 22 codes), `legitimation_verified` (false; nothing sets it in the pilot), `updated_at`, `updated_by_user_guid` |
+
+A new table, not three columns on `professionals`: `init_db.py` (create_all)
+is the whole migration, as for #1045/#1050. Rules (format, synthetic marker,
+the 22 codes) are in `src/services/professional_qualification.py`; the blob
+fields are added in `auth_service.build_access_blob` before the activation
+gate and are not in `LEGACY_BLOB_FIELDS`.
+
+### Patient extract (#1059)
+
+`src/services/patient_extract.py`, route in `routes/patient_access.py`. Reads
+only; writes the `patient_extract` audit event. `SECRET_COLUMNS` lists every
+column whose value must never appear in an extract, and `TABLES_READ` the
+tables it reads; a test fails if one of those tables grows a secret-looking
+column that is not listed. The scope check reuses eps's
+`/api/v1/patients/<guid>/clinics` (`eps_client.listed_units`, no
+development opt-out).
+
 `patient_links.care_unit_guid` existed from #1040 (invite unit, link-code unit).
 Since #1049 it is in the blob, and it is set at self-registration. Rows written
 before carry the unit they were made for, or null (SU relink without a unit).

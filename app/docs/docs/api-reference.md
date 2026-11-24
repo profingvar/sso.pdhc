@@ -164,6 +164,15 @@ Returns the access blob for the authenticated user.
 |-------|------|-------|---------|
 | `must_change_password` | bool | #43 | SU triggered a password reset. Callers MUST block normal actions and route the user to the `/change-password` page until this flips back to `false`. |
 | `effective_phases` | list[str] | #46/#57 | Direct `UserPhase` grants **only**. Groups are orthogonal organisational/category metadata and do NOT contribute to phase access (#57). `'planning' in effective_phases` remains the canonical phase check — same field, narrower source. |
+| `hsa_id` | str \| null | #1054 | Professionals only. The person's HSA-id, upper-case (`SE` + 10-digit organisation number + `-` + 1–18 letters/digits, max 31 chars). Null when none is recorded. In the pilot always synthetic (D8) |
+| `hsa_id_synthetic` | bool | #1054 | Professionals only. True when the HSA-id carries the synthetic marker (serial part starts with `HSA_ID_SYNTHETIC_PREFIX`, default `SYNT`). A printout should say so |
+| `legitimation` | str \| null | #1054 | Professionals only. One of Socialstyrelsen's 22 legitimationsyrken as an ASCII code: `apotekare`, `arbetsterapeut`, `audionom`, `barnmorska`, `biomedicinsk_analytiker`, `dietist`, `fysioterapeut`, `halso_och_sjukvardskurator`, `kiropraktor`, `logoped`, `lakare`, `naprapat`, `optiker`, `ortopedingenjor`, `psykolog`, `psykoterapeut`, `receptarie`, `rontgensjukskoterska`, `sjukhusfysiker`, `sjukskoterska`, `tandhygienist`, `tandlakare`. Null = none recorded |
+| `legitimation_verified` | bool | #1054 | Professionals only. Always `false` in the pilot: there is no lookup against Socialstyrelsen's register |
+| `affiliations[].role` | str | S6 | The role per care unit (`doctor`, `nurse`, …). With `legitimation` this is what record.pdhc shows as "ansvarig med yrkesroll" |
+
+The four #1054 fields are always present for a professional (also while
+`activation_pending`), and they are **not** legacy fields: the
+`SSO_EMIT_LEGACY_BLOB_FIELDS=false` kill-switch does not remove them.
 
 **Errors:**
 
@@ -477,6 +486,53 @@ login*.
 
 ---
 
+## Patient extract for record.pdhc (#1059)
+
+### `GET /api/v1/patient-extract/<patient_guid>`
+
+Everything SSO holds about one patient, in the common extract format
+`pdhc.patient-extract/1` (contract: `plans/record_pdhc_extract_contract.md` in
+the workspace repo). `<patient_guid>` is the **eps** patient guid (the
+`ips_patient_guid` of a patient link or invite).
+
+**Auth:** the professional's own `Authorization: Bearer` token. The SU page's
+session cookie is not accepted here, and no service key gives access.
+
+**Who gets it:** an SU admin; or an activated professional with an active
+affiliation in role `doctor` or `nurse` to a care unit where eps lists the
+patient (SSO asks eps `GET /api/v1/patients/<guid>/clinics`, the same call as
+the invite check; there is no development opt-out).
+
+| status | error | when |
+|---|---|---|
+| 200 | — | the extract (`sections: []` when SSO holds nothing) |
+| 401 | `authentication_required` | no valid Bearer |
+| 403 | `forbidden` | a patient token |
+| 403 | `must_change_password` | the professional must change password first |
+| 404 | `not_found` | unknown patient, malformed guid, not listed at any of the caller's doctor/nurse units, other role, not activated — one answer for all |
+| 503 | `eps_unavailable` / `eps_not_configured` | eps could not answer, so the gate cannot be decided (fails closed) |
+
+Sections (only those with items), each item with one or more `versions`:
+
+| key | content | never |
+|---|---|---|
+| `account` | the account CURRENTLY linked: e-mail, type, status, created/updated, password changed, name, login-lock state | password hash, personnummer |
+| `second_factors` | passkey (name, created, last used), authenticator app (created, confirmed) | credential id, public key, TOTP secret |
+| `invites` | every invite for this patient: unit, created, expires, used/revoked/locked/expired/open, by whom, the name care gave, wrong-personnummer attempts | token, token hash |
+| `patient_link` | the link and its history event by event (account by guid), the account's link codes (dates) | link code, code hash |
+| `reenrolments` | one-time codes after an SU reset: issued, expires, used, completed, voided | the code, its hash |
+
+An account that was linked to this patient earlier and then relinked or
+unlinked appears only as a guid in the link history: it may be another
+person's. SSO keeps no version history of these rows, so each has one
+version; `notes` says so. Response header `Cache-Control: no-store`.
+
+**Audit:** every call, refusals included, writes `patient_extract` with
+`outcome` (`ok`/`refused`), `reason`, the patient guid, and for `ok` the basis
+(`su` or `affiliation:<unit>`) and the count per section.
+
+---
+
 ## Groups (`/api/groups`)
 
 ### `GET /api/groups`
@@ -753,6 +809,26 @@ the `login_lockouts` table).
 
 - `GET /api/admin/login-locks` → `200 [{"user_guid": "…", "email": "…", "locked_until": "…"}]`, accounts locked right now.
 - `POST /api/admin/users/<user_guid>/unlock-login` → `200 {"user_guid": "…", "was_locked": true}`. Ends the lock and clears the failure counter. `404` unknown user. Audited (`login_unlock`).
+
+### `PUT /api/admin/users/<user_guid>/qualification` *(#1054)*
+
+SU admin only. Sets a professional's HSA-id and/or legitimation:
+`{"hsa_id": "SE5565594230-SYNT0001", "legitimation": "lakare"}`. Keys present
+are changed, a blank value clears, other keys are ignored
+(`legitimation_verified` cannot be set). Returns the four blob fields.
+
+| status | error | meaning |
+|---|---|---|
+| 400 | `invalid_hsa_id` | not `SE` + 10 digits + `-` + 1–18 letters/digits, max 31 |
+| 400 | `hsa_id_not_synthetic` | pilot (`HSA_ID_SYNTHETIC_ONLY=true`): the part after `-` must start with `HSA_ID_SYNTHETIC_PREFIX` (default `SYNT`) |
+| 400 | `invalid_legitimation` | not one of the 22 codes (see the blob table) |
+| 403 | `forbidden` | not SU |
+| 404 | `not_found` | no professional with that user guid |
+| 409 | `hsa_id_taken` | another professional holds that HSA-id |
+
+Audited as `set_professional_qualification` with the from/to of each changed
+field. The SU page has the same form on each professional's row.
+`GET /api/admin/users` shows the four fields per professional.
 
 ### `POST /api/admin/users/<user_guid>/flush-sessions` *(#44)*
 

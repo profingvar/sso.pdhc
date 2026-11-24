@@ -314,6 +314,7 @@ After deploying to a new environment:
 - [ ] Spot-check a downstream `/me/service` call returns `must_change_password` and `effective_phases` fields in the blob
 - [ ] `effective_phases` sourced only from `UserPhase` (#57) — verified via `scripts/phases_migration_report.py`, with SU having explicitly granted phases to every user who should retain access after the cutover
 - [ ] Schema includes the six #1040 tables (`webauthn_credentials`, `totp_secrets`, `patient_links`, `patient_link_history`, `patient_invites`, `patient_link_codes`) — created by `init_db.py`
+- [ ] Schema includes `professional_qualifications` (#1054) — created by `init_db.py`
 - [ ] Schema includes `login_lockouts` (#1040) — created by `init_db.py`. No `.env` variable: 5 failures / 15 minutes are constants in `src/services/login_lockout.py`
 - [ ] `EPS_BASE_URL` / `EPS_API_KEY` set; an invite for a made-up patient guid answers `patient_not_found`, not `eps_unavailable` (#1040)
 - [ ] `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` set; a patient can add a passkey at `/second-factor` (#1040)
@@ -342,6 +343,23 @@ Back up these files:
 - `app/.env` — secrets and configuration
 - `app/oath_overview.csv` — service registry
 - `logs/` — audit logs (for compliance)
+
+---
+
+## HSA-id / legitimation (#1054) and the patient extract (#1059)
+
+1. Take a `pg_dump`, then run `python scripts/init_db.py` in the app
+   container **before** the new code. It creates ONE new table,
+   `professional_qualifications`; no existing table is altered, so there is
+   no migration script. Without the table every professional's
+   `/api/auth/me/service` answers 500, so the order matters.
+2. Deploy the code. No new `.env` key is required: `HSA_ID_SYNTHETIC_ONLY`
+   defaults to `true` and `HSA_ID_SYNTHETIC_PREFIX` to `SYNT` (pilot, D8).
+3. The extract needs `EPS_BASE_URL` / `EPS_API_KEY` as for #1040 (same eps
+   route, no new scope). Without them a non-SU extract answers 503.
+4. Check: `/api/health` 200; a professional's `/api/auth/me/service` carries
+   `hsa_id: null`, `legitimation_verified: false`; an extract without a Bearer
+   answers 401 and writes a `patient_extract` line to the audit log.
 
 ---
 

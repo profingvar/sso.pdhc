@@ -70,6 +70,19 @@ data and applies whenever it is granted, regardless of role.)
     affiliation — at least one research project attached. If something is
     missing, the SU is shown exactly what to fix.
 
+### Your HSA-id and legitimation (#1054)
+
+An SU records your HSA-id and your legitimation (läkare, sjuksköterska, …).
+record.pdhc shows them next to your name on journal entries you are
+responsible for. You cannot change them yourself; ask an SU if they are wrong.
+In the pilot the HSA-id is synthetic (it contains `SYNT`) and the legitimation
+is marked as not verified.
+
+*Svenska:* En SU registrerar ditt HSA-id och ditt legitimationsyrke.
+record.pdhc visar dem vid ditt namn på journalanteckningar du är ansvarig för.
+Du kan inte ändra dem själv; be en SU om något är fel. I piloten är HSA-id
+syntetiskt (innehåller `SYNT`) och legitimationen är inte verifierad.
+
 ### Dashboard
 
 After login, the dashboard shows:

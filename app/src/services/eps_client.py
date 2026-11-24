@@ -92,6 +92,36 @@ def verify_patient(config, ips_patient_guid, care_unit_guid=None):
     Returns 'checked', or 'skipped' under the development opt-out."""
     if opt_out_requested(config) and opt_out_allowed(config):
         return 'skipped'
+    clinics = _fetch_clinics(config, ips_patient_guid)
+    if care_unit_guid:
+        wanted = str(care_unit_guid).strip().lower()
+        if wanted in _active_units(clinics):
+            return 'checked'
+        raise EpsRefusal(PATIENT_NOT_AT_UNIT)
+    return 'checked'
+
+
+def listed_units(config, ips_patient_guid):
+    """#1059: the care units (lower-case guids) the patient is actively listed
+    at in eps. Raise EpsRefusal(NOT_CONFIGURED | UNAVAILABLE |
+    PATIENT_NOT_FOUND). NO development opt-out: this decides who may read a
+    patient's extract, and without eps there is no answer to that."""
+    return _active_units(_fetch_clinics(config, ips_patient_guid))
+
+
+def _active_units(clinics):
+    units = set()
+    for c in clinics:
+        if not isinstance(c, dict) or c.get('is_active') is False:
+            continue
+        unit = c.get('care_unit_guid') or c.get('organisation_guid')
+        if unit:
+            units.add(str(unit).strip().lower())
+    return units
+
+
+def _fetch_clinics(config, ips_patient_guid):
+    """GET the patient's clinics from eps; the list, or EpsRefusal."""
     base = (config.get('EPS_BASE_URL') or '').strip().rstrip('/')
     key = (config.get('EPS_API_KEY') or '').strip()
     if not base or not key:
@@ -126,16 +156,7 @@ def verify_patient(config, ips_patient_guid, care_unit_guid=None):
     canonical = (getattr(resp, 'headers', None) or {}).get('X-PDHC-Patient-Guid')
     if canonical and str(canonical).strip().lower() != str(ips_patient_guid).strip().lower():
         raise EpsRefusal(PATIENT_NOT_FOUND, 'identifier is not the platform guid')
-    if care_unit_guid:
-        wanted = str(care_unit_guid).strip().lower()
-        for c in clinics:
-            if not isinstance(c, dict) or c.get('is_active') is False:
-                continue
-            unit = c.get('care_unit_guid') or c.get('organisation_guid')
-            if unit and str(unit).strip().lower() == wanted:
-                return 'checked'
-        raise EpsRefusal(PATIENT_NOT_AT_UNIT)
-    return 'checked'
+    return clinics
 
 
 # --- #1049: self-registration creates the patient in eps --------------------

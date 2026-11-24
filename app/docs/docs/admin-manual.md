@@ -402,6 +402,73 @@ In the pilot only test personnummer are accepted
 
 ---
 
+### HSA-id and legitimation (#1054, record.pdhc)
+
+record.pdhc shows who is responsible for a journal entry **with their
+professional role**, and decides who may sign. It reads two things from SSO:
+the role per care unit (the affiliation, unchanged) and, new, the person's
+**HSA-id** and **legitimation**.
+
+**Set them** on the professional's row in the SU page (the small form under
+the role: HSA-id field, legitimation list, **Spara**), or with
+`PUT /api/admin/users/<user_guid>/qualification`. Only an SU can. A blank
+field clears the value. Every change is audited with old and new value.
+
+- **HSA-id**: `SE` + the 10-digit organisation number + `-` + 1–18 letters or
+  digits, at most 31 characters, e.g. `SE5565594230-SYNT0001`. Stored
+  upper-case. Two people cannot share one.
+- **Pilot rule (D8): synthetic HSA-ids only.** The part after the dash must
+  start with `SYNT` (`HSA_ID_SYNTHETIC_PREFIX`). A real-looking HSA-id such as
+  `SE2321000016-1234` is refused ("The pilot accepts synthetic HSA-ids only").
+  The operator turns this off (`HSA_ID_SYNTHETIC_ONLY=false`) only at level B,
+  when real HSA-ids are allowed.
+- **Legitimation**: one of Socialstyrelsen's 22 legitimationsyrken (läkare,
+  sjuksköterska, barnmorska, fysioterapeut, …), or none — an undersköterska,
+  for example, has none. It is shown as **ej verifierad**: the pilot has no
+  lookup against Socialstyrelsen's register, so `legitimation_verified` is
+  always false, and a change of legitimation keeps it false.
+
+#### Svenska: HSA-id och legitimation
+
+record.pdhc visar vem som är ansvarig för en journalanteckning **med
+yrkesroll** och avgör vem som får signera. Från SSO läser den rollen per
+vårdenhet (affilieringen, som förut) och nu även personens **HSA-id** och
+**legitimationsyrke**.
+
+**Så sätter du dem:** på den professionelles rad i SU-sidan (det lilla
+formuläret under rollen: fältet HSA-id, listan legitimation, **Spara**), eller
+med `PUT /api/admin/users/<user_guid>/qualification`. Bara en SU kan. Ett tomt
+fält tar bort värdet. Varje ändring loggas med gammalt och nytt värde.
+
+- **HSA-id**: `SE` + vårdgivarens tiosiffriga organisationsnummer + `-` +
+  1–18 bokstäver eller siffror, högst 31 tecken, t.ex.
+  `SE5565594230-SYNT0001`. Två personer kan inte ha samma.
+- **I piloten bara syntetiska HSA-id (D8).** Delen efter bindestrecket måste
+  börja med `SYNT`. Ett HSA-id som ser riktigt ut nekas. Riktiga HSA-id först
+  på nivå B (operatören sätter då `HSA_ID_SYNTHETIC_ONLY=false`).
+- **Legitimation**: ett av Socialstyrelsens 22 legitimationsyrken, eller
+  ingen (en undersköterska har till exempel ingen legitimation). Visas som
+  **ej verifierad**: piloten slår inte upp legitimationen i Socialstyrelsens
+  register.
+
+### Patient extract (#1059, record.pdhc)
+
+`GET /api/v1/patient-extract/<eps patient guid>` gives everything SSO holds
+about a patient — the linked account, its login factors (type and dates),
+invites, the link and its history, one-time codes — for record.pdhc's PDF
+extract. **Never** a password hash, an authenticator secret, a passkey key,
+an invite or link code, a re-enrolment code, or a personnummer. Allowed: SU,
+and doctors and nurses affiliated to a care unit where eps lists the patient;
+everyone else gets 404 as if the patient did not exist. Every call is in the
+audit log as `patient_extract`, refusals too. Details: API Reference.
+
+**Svenska.** Utdraget ger allt SSO har om patienten: kopplat konto,
+inloggningsfaktorer (typ och datum), inbjudningar, kopplingen och dess
+historik, engångskoder. Aldrig lösenordshash, hemligheter, nycklar, koder
+eller personnummer. Får tas ut av SU och av läkare och sjuksköterskor som är
+affilierade till en vårdenhet där patienten är listad i eps; alla andra får
+404. Varje anrop loggas som `patient_extract`, även nekade.
+
 ### External Partners
 
 Third-party callers licensed to talk to PDHC are managed in the **External
@@ -654,6 +721,12 @@ All admin actions are logged to structured audit files in `LOG_DIR`:
 - Login lockout (#1040): `login_locked` (the fifth wrong password; account,
   `locked_until`), `login_refused_locked` (an attempt during the lock, right
   password or not), `login_unlock` (SU, target, whether it was locked)
+- HSA-id and legitimation (#1054): `set_professional_qualification` (SU,
+  target, from/to of each changed field)
+- Patient extract (#1059): `patient_extract` on every call to
+  `GET /api/v1/patient-extract/<guid>`: who, which patient, `outcome`
+  `ok`/`refused`, the reason of a refusal, and for `ok` the basis and the
+  count per section. Unauthenticated calls are logged with no user
 - Patient app (#1040): `patient_invite_create` / `_revoke` / `_accept` / `_refused`,
   `patient_link_code_create`, `patient_link` (who, which account, which patient,
   method), `patient_link_refused` (with the real reason, which the caller is not

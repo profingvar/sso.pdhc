@@ -209,3 +209,35 @@ def su_reset_second_factor(user_guid):
                     "message": sf.REENROL_SHOWN_ONCE_TEXT})
     resp.headers['Cache-Control'] = 'no-store'
     return resp, 200
+
+
+# --- #1059: patient extract for record.pdhc ----------------------------------
+
+@patient_access_bp.route('/v1/patient-extract/<patient_guid>', methods=['GET'])
+def patient_extract(patient_guid):
+    """Everything sso holds about one eps patient (contract
+    plans/record_pdhc_extract_contract.md). Door: the professional's OWN SSO
+    bearer — not the SU page's session, and no service key. Gate, sections and
+    the secrets that are never included: services/patient_extract.py. Every
+    call is audited as `patient_extract`, refusals included. No rate limit:
+    sso's limiter keeps ONE bucket per IP across endpoints, and record.pdhc
+    calls from one address; the call is authenticated and audited."""
+    from src.middleware.auth_middleware import _get_current_user
+    from src.services import patient_extract as px
+    ip = request.remote_addr
+    user = None
+    if request.headers.get('Authorization', '').startswith('Bearer '):
+        user = _get_current_user()
+    if user is None:
+        audit('patient_extract', user_guid=None,
+              detail={'outcome': 'refused', 'reason': 'no_valid_bearer', 'status': 401,
+                      'patient_guid': str(patient_guid)[:64]}, ip=ip)
+        return jsonify({"error": "authentication_required",
+                        "message": "Valid Bearer token required"}), 401
+    try:
+        body = px.extract(get_db(), user, patient_guid, current_app.config, ip=ip)
+    except px.ExtractRefused as e:
+        return jsonify({"error": e.code, "message": e.message}), e.status
+    resp = jsonify(body)
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp, 200
