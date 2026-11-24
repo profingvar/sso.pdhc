@@ -49,6 +49,8 @@ class TestAllTablesCreated:
         'patient_invite_details',
         # #1045: the one-time code an SU second-factor reset issues
         'second_factor_reenrolments',
+        # #1054: HSA-id and legitimation
+        'professional_qualifications',
     ]
 
     def test_all_tables_exist(self, db_session):

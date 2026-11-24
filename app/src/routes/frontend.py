@@ -518,6 +518,8 @@ def admin_page():
             'created_at': u.created_at.isoformat() if u.created_at else '',
             'first_name': '', 'last_name': '', 'professional_role': '',
             'personnummer': '', 'organization_ids': [],
+            'hsa_id': None, 'legitimation': None,          # #1054
+            'legitimation_verified': False,
             'employments': [],         # list[{employment_guid, caregiver_guid}]
             'affiliations': [],        # list[{care_unit_guid, role, status}]
             'direct_phases': [],       # list[str]
@@ -529,6 +531,9 @@ def admin_page():
                 entry['first_name'] = prof.first_name or ''
                 entry['last_name'] = prof.last_name or ''
                 entry['professional_role'] = prof.professional_role or ''
+                # #1054: HSA-id and legitimation
+                from src.services.professional_qualification import for_blob as _qual
+                entry.update(_qual(db, prof, current_app.config))
             # Load org assignments
             user_orgs = db.query(UserOrganisation).filter_by(user_guid=u.guid).all()
             entry['organization_ids'] = [uo.organisation_guid for uo in user_orgs]
@@ -673,7 +678,9 @@ def admin_page():
     rg_research_projects = [{'guid': p.guid, 'name': p.name}
                             for p in db.query(ResearchProject).order_by(ResearchProject.name)]
 
+    from src.services.professional_qualification import LEGITIMATIONSYRKEN
     return render_template('su_admin.html',
+                           legitimationsyrken=LEGITIMATIONSYRKEN,
                            rg_research_projects=rg_research_projects,
                            users=users, organisations=organisations,
                            access_requests=access_requests,
@@ -949,6 +956,27 @@ def admin_set_professional_role():
           detail={'target_guid': target_guid, 'from': old, 'to': new_role},
           ip=request.remote_addr)
     flash(f'{target.email}: role {old or "—"} → {new_role}.', 'success')
+    return redirect(url_for('frontend.admin_page'))
+
+
+@frontend_bp.route('/admin/set-professional-qualification', methods=['POST'])
+@_require_su_login
+def admin_set_professional_qualification():
+    """#1054: SU sets a professional's HSA-id and legitimation (record.pdhc).
+    Both fields are always sent by the form; blank clears."""
+    from src.services import professional_qualification as pq
+    user = _get_session_user()
+    target_guid = request.form.get('user_guid', '').strip()
+    data = {'hsa_id': request.form.get('hsa_id', ''),
+            'legitimation': request.form.get('legitimation', '')}
+    try:
+        out = pq.set_qualification(get_db(), user, target_guid, data,
+                                   current_app.config, ip=request.remote_addr)
+    except pq.QualificationRefused as e:
+        flash(e.message, 'error')
+        return redirect(url_for('frontend.admin_page'))
+    flash(f"HSA-id {out['hsa_id'] or '—'}, legitimation "
+          f"{pq.LEGITIMATIONSYRKEN.get(out['legitimation'], '—')} saved.", 'success')
     return redirect(url_for('frontend.admin_page'))
 
 

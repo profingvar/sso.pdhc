@@ -34,12 +34,15 @@ from src.models.patient_profile import PatientProfile
 from src.models.patient_invite_detail import PatientInviteDetail
 # #1045: the one-time code an SU reset of the second factor issues.
 from src.models.second_factor_reenrolment import SecondFactorReenrolment
+# #1054: a professional's HSA-id and legitimation (record.pdhc).
+from src.models.professional_qualification import ProfessionalQualification
 
 __all__ = [
     'ReadGrant',
     'WebAuthnCredential', 'TotpSecret', 'LoginLockout',
     'PatientLink', 'PatientLinkHistory', 'PatientInvite', 'PatientLinkCode',
     'PatientProfile', 'PatientInviteDetail', 'SecondFactorReenrolment',
+    'ProfessionalQualification',
     'User', 'Patient', 'Professional', 'Organisation', 'OrganisationAudit',
     'UserOrganisation', 'Group', 'Membership', 'GroupProposal',
     'LeaderRequest', 'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',

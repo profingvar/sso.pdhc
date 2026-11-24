@@ -70,6 +70,12 @@ class Config:
     # "already registered" cannot be told from "created" by timing.
     PATIENT_REGISTRATION_MIN_SECONDS = float(os.environ.get(
         'PATIENT_REGISTRATION_MIN_SECONDS', '1.0'))
+    # #1054 / record.pdhc D8: the pilot holds SYNTHETIC HSA-ids only. Default
+    # TRUE: an HSA-id is accepted only when the part after the dash starts with
+    # HSA_ID_SYNTHETIC_PREFIX, so a real person's HSA-id cannot be stored by
+    # mistake. Real HSA-ids come at level B (set false then).
+    HSA_ID_SYNTHETIC_ONLY = os.environ.get('HSA_ID_SYNTHETIC_ONLY', 'true')
+    HSA_ID_SYNTHETIC_PREFIX = os.environ.get('HSA_ID_SYNTHETIC_PREFIX', 'SYNT')
 
     # Service credentials: collected as dict {client_id: secret}
     SERVICE_CREDENTIALS = {}
@@ -129,3 +135,5 @@ class TestConfig(Config):
     PATIENT_REGISTRATION_UNITS = ''
     PATIENT_REGISTRATION_SYNTHETIC_ONLY = 'true'
     PATIENT_REGISTRATION_MIN_SECONDS = 0.0
+    HSA_ID_SYNTHETIC_ONLY = 'true'
+    HSA_ID_SYNTHETIC_PREFIX = 'SYNT'

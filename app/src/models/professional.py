@@ -25,6 +25,13 @@ class Professional(Base):
 
     # Relationships
     user = relationship('User', back_populates='professional')
+    # #1054: HSA-id and legitimation live in their own table (a new table, not
+    # new columns: see models/professional_qualification.py). Deleted with the
+    # professional, so a deleted account's HSA-id can be given to someone else.
+    qualification = relationship('ProfessionalQualification', uselist=False,
+                                 cascade='all, delete-orphan',
+                                 primaryjoin='Professional.guid == ProfessionalQualification.professional_guid',
+                                 foreign_keys='ProfessionalQualification.professional_guid')
 
     def __repr__(self):
         return f'<Professional {self.guid} role={self.professional_role}>'

@@ -60,6 +60,10 @@ def list_users():
             if prof:
                 entry['professional_guid'] = prof.guid
                 entry['professional_role'] = prof.professional_role
+                # #1054: hsa_id, hsa_id_synthetic, legitimation, legitimation_verified
+                from flask import current_app
+                from src.services.professional_qualification import for_blob as _qual
+                entry.update(_qual(session, prof, current_app.config))
                 entry['first_name'] = prof.first_name
                 entry['last_name'] = prof.last_name
 
@@ -1225,6 +1229,29 @@ def update_oath_overview():
 # may create/remove Affiliation rows (non-SU -> 403 via @require_su).
 # Activation is blocked server-side while the profile is incomplete —
 # the guided UI renders the same `missing` list the API computes.
+
+
+# --- #1054: HSA-id and legitimation (record.pdhc stage 2) ---
+
+@admin_bp.route('/users/<user_guid>/qualification', methods=['PUT'])
+@require_auth
+@require_su
+def set_user_qualification(user_guid):
+    """PUT /api/admin/users/<guid>/qualification — SU sets the professional's
+    `hsa_id` and/or `legitimation` (keys present are changed, blank clears).
+    `legitimation_verified` cannot be set: the pilot has no register lookup."""
+    from flask import current_app
+    from src.services import professional_qualification as pq
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    data = {k: v for k, v in data.items() if k in ('hsa_id', 'legitimation')}
+    try:
+        out = pq.set_qualification(get_db(), g.current_user, user_guid, data,
+                                   current_app.config, ip=request.remote_addr)
+    except pq.QualificationRefused as e:
+        return jsonify({"error": e.code, "message": e.message}), e.status
+    return jsonify({"user_guid": user_guid, **out}), 200
 
 
 @admin_bp.route('/users/<user_guid>/employments', methods=['GET'])

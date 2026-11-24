@@ -171,6 +171,13 @@ def build_access_blob(user, session, session_id=None, token_payload=None):
             blob['professional_guid'] = professional.guid
             blob['professional_role'] = professional.professional_role
             blob['fhir_resource_type'] = Professional.FHIR_RESOURCE_TYPE
+        # #1054 (record.pdhc): HSA-id and legitimation. Identity, not access,
+        # so emitted before the activation gate below and NOT in
+        # LEGACY_BLOB_FIELDS: the kill-switch never removes them. Always all
+        # four keys (null/false when nothing is recorded).
+        from flask import current_app
+        from src.services.professional_qualification import for_blob as _qual
+        blob.update(_qual(session, professional, current_app.config))
 
         # S9 (#411) activation gate: an unactivated professional gets a
         # NO-ACCESS blob — identity only, every scope/phase field empty —

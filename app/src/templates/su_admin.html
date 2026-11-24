@@ -180,6 +180,22 @@
                                     {% endfor %}
                                 </select>
                             </form>
+                            {# #1054: HSA-id and legitimation (record.pdhc). Pilot: synthetic HSA-ids only (D8). #}
+                            <form method="post" action="/admin/set-professional-qualification" style="display:flex;gap:2px;align-items:center;margin:2px 0 0 0;flex-wrap:wrap;"
+                                  title="HSA-id and legitimation (set by SU; legitimation is not verified against Socialstyrelsen in the pilot)">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
+                                <input type="text" name="hsa_id" value="{{ u.hsa_id or '' }}" placeholder="SE…-SYNT…" maxlength="31"
+                                       style="font-size:0.7rem;padding:0 2px;width:11rem;" aria-label="HSA-id">
+                                <select name="legitimation" style="font-size:0.7rem;padding:0 2px;" aria-label="Legitimation">
+                                    <option value="" {% if not u.legitimation %}selected{% endif %}>— ingen legitimation —</option>
+                                    {% for code, name in legitimationsyrken.items() %}
+                                    <option value="{{ code }}" {% if u.legitimation == code %}selected{% endif %}>{{ name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="submit" style="font-size:0.7rem;padding:0 4px;">Spara</button>
+                                {% if u.legitimation and not u.legitimation_verified %}<span style="font-size:0.65rem;opacity:0.7;">ej verifierad</span>{% endif %}
+                            </form>
                         {% else %}
                             <span title="Personnummer">{{ u.personnummer or '— no personnummer —' }}</span>
                         {% endif %}
