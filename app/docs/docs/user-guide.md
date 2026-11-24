@@ -201,8 +201,12 @@ is created.
 - You can remove a factor on the same page, but **not the last one**.
 - A code can be used once. After five wrong codes the app login is locked for
   15 minutes; a passkey still works.
-- **Lost your device?** Contact your care unit. An administrator can reset your
-  second factor; you then add a new one at your next login.
+- **Lost your device?** Contact your care unit. After checking who you are, an
+  administrator resets your second factor and gives you a **one-time code**
+  (ten characters, e.g. `ABCDE-23456`). At your next login you type the code
+  after your password, then add a new passkey or authenticator app. The code
+  works once and for 72 hours; if it does not work, contact your care unit
+  for a new one.
 
 ### Dashboard
 
@@ -253,8 +257,11 @@ i sju dagar) till din vårdenhet, som kopplar kontot.
   inte emot riktiga personnummer.
 - *Du har redan ett konto.* Logga in med det i patientappen. Ingen ny
   inbjudan behövs.
-- *Du har bytt eller tappat din telefon.* Kontakta din vårdenhet, så får du
-  lägga till en ny andra faktor.
+- *Du har bytt eller tappat din telefon.* Kontakta din vårdenhet. När de har
+  kontrollerat vem du är återställer de din andra faktor och ger dig en
+  engångskod. Logga in med lösenordet, skriv in koden och lägg till en ny
+  passkey. Koden gäller en gång och i 72 timmar. Fungerar den inte, kontakta
+  vårdenheten igen så får du en ny.
 
 Varje gång du loggar in gör du det i två steg: först lösenordet, sedan din
 passkey eller koden från appen. Sedan kommer du till <https://patientapp.pdhc.se>.

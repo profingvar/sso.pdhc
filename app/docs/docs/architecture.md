@@ -417,13 +417,39 @@ What SSO itself enforces:
 | a passkey assertion is matched to a credential of THIS user | `finish_authentication` |
 | a WebAuthn challenge is consumed before it is checked (one attempt) | `login_passkey_verify`, `enrol_passkey_verify` |
 | TOTP: a code works once (the 30 s step is remembered); 5 wrong codes lock TOTP for 15 minutes | `second_factor._check_code` |
-| lost device: SU reset removes every factor and ends all sessions | `POST /api/admin/users/<guid>/second-factor/reset` |
+| lost device: SU reset removes every factor, ends all sessions and issues a one-time re-enrolment code shown once to the SU | `POST /api/admin/users/<guid>/second-factor/reset`, SU page `/admin/second-factor-reset` |
+| after a reset, a password login gets NO token until the one-time code is typed; only the session that typed it may enrol; the code is single use, void after 5 wrong entries, expires after 72 h, and a new reset replaces it | `begin_patient_login`, `/login/reenrol-code`, `_may_change_factors`, `second_factor.redeem_reenrolment_code` |
 
 **Trust on first use, stated.** An account with no factor enrols one with its
 password alone. For an invited account the one-time invite link is what binds
 the person; for a self-registered one, the link code handed to the care unit
-is. The SU reset re-opens that window, so it is the one operation where the SU
-must have checked who is asking.
+is.
+
+**The SU reset does NOT re-open that window (#1045).** Until #1045 it did: after
+a reset the password alone enrolled a new factor, so whoever held the password
+between the reset and the patient's next login could take the account over.
+Operator decision 2026-11-24, "engångskod i display": the reset generates a
+one-time code (10 characters from `ABCDEFGHJKMNPQRSTVWXYZ23456789`, shown as
+`XXXXX-XXXXX`, about 49 bits, from `secrets`) and shows it once — in the JSON
+response and on the SU page — never in a flash, a log or the audit. The SU
+checks who the patient is and gives them the code in person or by telephone.
+
+| | |
+|---|---|
+| storage | table `second_factor_reenrolments`, one row per user: a keyed HMAC of `<user_guid>:<code>` (`secret_store.keyed_hash`, purpose `second-factor-reenrolment`), never the code |
+| expiry | 72 h — spans a weekend (Friday afternoon to Monday) without a second call to the care unit; the guessing bound comes from the five tries, not from the expiry |
+| wrong entries | counted with an atomic `UPDATE … SET failed_attempts = failed_attempts + 1` and committed at once; at 5 the code is void |
+| single use | the right code sets `used_at` with a conditional `UPDATE … WHERE used_at IS NULL`, so two parallel right answers cannot both win |
+| the grant | the session that typed the code holds `sf_reenrol` = {user, row guid, time}; it may enrol for 30 minutes. Any other session still meets the gate |
+| completion | enrolling a passkey or TOTP sets `completed_at` and the gate is lifted |
+| a new reset | deletes the row and writes a new one (new guid): the earlier code, and any grant made from it, stop working |
+| refusals | unknown, wrong, expired, used and void all give one text ("Koden kunde inte godtas. Kontakta din vårdenhet …"); the reason is in the audit only |
+| JSON login | `POST /api/auth/login` answers `403 reenrolment_code_required` for such an account, so the password gets no token on that route either |
+
+Audit events: `second_factor_reset` (with `reenrolment_guid` and expiry, no
+code), `second_factor_reenrol_code_refused` (`reason`),
+`second_factor_reenrol_code_locked`, `second_factor_reenrol_code_used`,
+`second_factor_reenrolment_complete`.
 
 **Configuration.** Passkeys are bound to one site: `WEBAUTHN_RP_ID` and
 `WEBAUTHN_ORIGIN` (production `sso.pdhc.se` / `https://sso.pdhc.se`). There is
@@ -896,14 +922,14 @@ flowchart TD
 | `auth` | `/api/auth` | `login`, `me`, `me/service`, `logout`, `change-password` |
 | `patient` | `/api/patient` | Patient self-service |
 | `patient_access` | `/api` | #1040, Bearer: `POST /patient/link-code`; `POST /patient-links/invites`, `DELETE /patient-links/invites/<guid>`, `POST /patient-links/redeem`; SU `PUT`/`DELETE /admin/patient-links/<user_guid>`, `POST /admin/users/<guid>/second-factor/reset`; `GET /auth/second-factor` |
-| `second_factor_ui` | — | #1040, session cookie + CSRF: `/login/second-factor[/passkey/options|/passkey/verify|/totp]`, `/second-factor[/passkey/options|/passkey/verify|/totp/start|/totp/confirm|/remove]`, `/patient-invite/<token>`, `/patient-link/code|invite|redeem` |
+| `second_factor_ui` | — | #1040, session cookie + CSRF: `/login/second-factor[/passkey/options|/passkey/verify|/totp]`, `/second-factor[/passkey/options|/passkey/verify|/totp/start|/totp/confirm|/remove]`, `/patient-invite/<token>`, `/patient-link/code|invite|redeem`; #1045 `/login/reenrol-code` |
 | `groups` | `/api/groups` | Membership / admin / invite flows |
 | `admin` | `/api/admin` | SU administration (see below) |
 | `registry` | `/api/registry` | Roles, research-projects, care-organisations, care-units |
 | `public` | `/api/public` | Unauthenticated lookups + access-request + partner lookup |
 | `internal` | — | Service-key internal endpoints (push-config, partner validate) |
 | `partners` | — | External-partner subsystem (`/api/admin/partners/*`, etc.) |
-| `frontend` | — | Server-rendered pages + service-key admin |
+| `frontend` | — | Server-rendered pages + service-key admin; #1045 SU `/admin/second-factor-reset` (shows the one-time code once) |
 | `fhir` | — | Capability statement |
 
 ### SU admin surface (`/api/admin`)

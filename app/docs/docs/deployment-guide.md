@@ -216,7 +216,8 @@ Then:
     - `WEBAUTHN_RP_ID`: changing it orphans every registered passkey.
     - `SECRET_KEY`: rotating it makes enrolled authenticator-app secrets
       unreadable (those patients enrol again; passkeys keep working) and voids
-      outstanding invites and link codes — in addition to logging everyone out.
+      outstanding invites, link codes and second-factor re-enrolment codes
+      (#1045; the SU resets again) — in addition to logging everyone out.
 
 !!! warning
     Change `BOOTSTRAP_SU_PASSWORD` immediately after first login. Rotate `SECRET_KEY` if compromised — this invalidates all active JWTs.

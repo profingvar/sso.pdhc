@@ -12,8 +12,6 @@ are in routes/second_factor_ui.py: they need the session cookie.
   GET    /api/auth/second-factor                      own status
   POST   /api/admin/users/<user_guid>/second-factor/reset   SU: lost device
 """
-from datetime import datetime, timezone
-
 from flask import Blueprint, current_app, g, jsonify, request
 
 from src.db import get_db
@@ -171,6 +169,8 @@ def second_factor_status():
     user = g.current_user
     body = sf.second_factor_for_blob(session, user, g.token_payload)
     body['enrolled_methods'] = sf.enrolled_methods(session, user.guid)
+    # #1045: reset by an SU and not yet re-enrolled (needs the one-time code).
+    body['reenrolment_required'] = sf.reenrolment_required(session, user.guid)
     return jsonify(body), 200
 
 
@@ -178,19 +178,34 @@ def second_factor_status():
 @require_auth
 @require_su
 def su_reset_second_factor(user_guid):
-    """Lost device. Removes every passkey and the TOTP secret and ends all the
-    user's sessions; at the next login the account enrols a new factor with
-    its password alone. So the SU must have verified who is asking: this is
-    the one place where a second factor can be replaced without presenting it.
+    """Lost device. Removes every passkey and the TOTP secret, ends all the
+    user's sessions, and issues a ONE-TIME RE-ENROLMENT CODE (#1045, operator
+    decision "engångskod i display").
+
+    The code is in this response and nowhere else: only a keyed hash is
+    stored, and it is never logged or audited. The SU checks who the patient
+    is and gives them the code in person or by telephone. Until the patient
+    has typed it, a password login gets no token and no new factor can be
+    enrolled, so holding the password alone after a reset is not enough to
+    take the account over (before #1045 it was: the password alone enrolled
+    a new factor). The code is valid for 72 h, once, and five wrong entries
+    void it; a new reset replaces it. See services/second_factor.py.
     """
     session = get_db()
     from src.models.user import User
     target = session.query(User).filter_by(guid=user_guid).first()
     if target is None:
         return jsonify({"error": "not_found", "message": "User not found"}), 404
-    removed = sf.reset_all(session, user_guid)
-    target.token_revocation_epoch = datetime.now(timezone.utc)
+    removed, code, row = sf.su_reset(session, target, g.current_user.guid, _secret())
     audit('second_factor_reset', user_guid=g.current_user.guid,
-          detail={'target_guid': user_guid, 'removed': removed},
+          detail={'target_guid': user_guid, 'removed': removed,
+                  'reenrolment_guid': row.guid,
+                  'reenrolment_expires_at': pl._iso(row.expires_at)},
           ip=request.remote_addr)
-    return jsonify({"user_guid": user_guid, "removed": removed}), 200
+    resp = jsonify({"user_guid": user_guid, "removed": removed,
+                    # Shown ONCE. Only a keyed hash is stored.
+                    "reenrolment_code": code,
+                    "reenrolment_code_expires_at": pl._iso(row.expires_at),
+                    "message": sf.REENROL_SHOWN_ONCE_TEXT})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp, 200

@@ -615,7 +615,8 @@ def test_su_reset_removes_factors_and_ends_sessions(world):
                for e in world['events'])
     time.sleep(1.1)
     r = _password_login(app.test_client())
-    assert r.headers['Location'].endswith('/second-factor')         # enrols again
+    # #1045: not straight to enrolment any more; the one-time code comes first.
+    assert r.headers['Location'].endswith('/login/reenrol-code')
 
 
 # =============================================================================

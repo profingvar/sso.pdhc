@@ -91,6 +91,19 @@ def login():
             params['state'] = state
         return redirect('/login?' + urlencode(params))
 
+    # #1045: a patient whose second factor an SU reset gets NO token from the
+    # password alone until the one-time re-enrolment code has been typed (in
+    # the browser, /login -> /login/reenrol-code). Fail closed here too.
+    if user.user_type == 'patient':
+        from src.services import second_factor as _sf
+        if (not _sf.is_enrolled(session, user.guid)
+                and _sf.reenrolment_required(session, user.guid)):
+            audit('login_refused', user_guid=user.guid,
+                  detail={'reason': 'reenrolment_code_required'}, ip=request.remote_addr)
+            return jsonify({"error": "reenrolment_code_required",
+                            "message": "Logga in i webbläsaren och ange engångskoden "
+                                       "från din vårdenhet."}), 403
+
     # Issue JWT
     secret_key = config.get('SECRET_KEY', '')
     expiry_hours = config.get('SESSION_EXPIRY_HOURS', 24)

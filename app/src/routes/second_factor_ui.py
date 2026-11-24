@@ -17,6 +17,14 @@ The login rule for a PATIENT account, in one place:
   handshake to a service (`next`)   -> only ever with a verified token. An
                                        unverified patient session is sent to
                                        enrol / step up first and resumes after.
+  password OK, factor RESET by an   -> NO token. The session holds only
+  SU and not yet re-enrolled           `sf_reenrol_pending`, and the page asks
+  (#1045)                              for the one-time code the SU gave the
+                                       patient. The right code gives the
+                                       unenrolled token above plus a session
+                                       grant (`sf_reenrol`) that alone lets
+                                       THIS session enrol. Without the code:
+                                       no token, no enrolment, no handshake.
 
 Professionals are untouched: they have no second factor in this stage.
 """
@@ -106,14 +114,51 @@ def _pending_user():
     return get_db().query(User).filter_by(guid=pending.get('u')).first()
 
 
+def reenrol_grant_ok(user):
+    """#1045: did THIS session type the right re-enrolment code for THIS
+    user's CURRENT reset, recently? A new reset (new row guid) ends it."""
+    grant = session.get('sf_reenrol') or {}
+    if grant.get('u') != user.guid:
+        return False
+    if time.time() - grant.get('at', 0) > sf.REENROL_GRANT_SECONDS:
+        return False
+    row = sf.pending_reenrolment(get_db(), user.guid)
+    return row is not None and row.guid == grant.get('r') and row.used_at is not None
+
+
+def _reenrol_pending_user():
+    """The user whose password was accepted and who now owes the one-time
+    re-enrolment code, or None."""
+    pending = session.get('sf_reenrol_pending')
+    if not pending:
+        return None
+    if time.time() - pending.get('at', 0) > PENDING_MAX_AGE_SECONDS:
+        session.pop('sf_reenrol_pending', None)
+        return None
+    from src.models.user import User
+    return get_db().query(User).filter_by(guid=pending.get('u')).first()
+
+
 def begin_patient_login(user, next_url, state, email=None):
     """Called by /login once a PATIENT's password is accepted."""
     db = get_db()
     session.pop('token', None)
     session.pop('wa_auth', None)
+    session.pop('sf_reenrol_pending', None)
     # A destination left over from an earlier, abandoned login must not win
     # over the one this login asked for.
     session.pop('sf_resume', None)
+    if (not sf.is_enrolled(db, user.guid) and sf.reenrolment_required(db, user.guid)
+            and not reenrol_grant_ok(user)):
+        # #1045: reset by an SU. The password alone gets nothing here: no
+        # token, no enrolment. The code page is the only way on.
+        session.pop('sf_pending', None)
+        session['sf_reenrol_pending'] = {'u': user.guid, 'next': next_url or '',
+                                         'state': state or '', 'at': int(time.time())}
+        audit('login_password_ok', user_guid=user.guid,
+              detail={'email': email, 'second_factor': 'reenrolment_code_required'},
+              ip=request.remote_addr)
+        return redirect(url_for('second_factor_ui.reenrol_code'))
     if sf.is_enrolled(db, user.guid):
         session['sf_pending'] = {'u': user.guid, 'next': next_url or '',
                                  'state': state or '', 'at': int(time.time())}
@@ -158,6 +203,11 @@ def _finish_login(user, method):
 def _upgrade_after_enrolment(user, method):
     """Enrolment proved possession of the factor: re-issue the session token
     with the claim. Returns where to go next."""
+    # #1045: a new factor ends a reset's gate (the code was already used).
+    if sf.complete_reenrolment(get_db(), user.guid):
+        audit('second_factor_reenrolment_complete', user_guid=user.guid,
+              detail={'method': method}, ip=request.remote_addr)
+    session.pop('sf_reenrol', None)
     resume = session.pop('sf_resume', None)
     token = _issue(user, sf.new_claim(method))
     session['token'] = token
@@ -173,8 +223,15 @@ def _upgrade_after_enrolment(user, method):
 
 def _may_change_factors(user):
     """Adding or removing a factor on an ENROLLED account needs a session that
-    itself presented one. Not enrolled yet: the password session may enrol."""
-    return (not sf.is_enrolled(get_db(), user.guid)) or session_claim() is not None
+    itself presented one. Not enrolled yet: the password session may enrol,
+    EXCEPT after an SU reset (#1045): then only a session that typed the
+    one-time re-enrolment code may."""
+    db = get_db()
+    if sf.is_enrolled(db, user.guid):
+        return session_claim() is not None
+    if sf.reenrolment_required(db, user.guid):
+        return reenrol_grant_ok(user)
+    return True
 
 
 def _json_error(e):
@@ -249,6 +306,46 @@ def login_totp():
               else 'Fel kod, eller en kod som redan har använts.', 'error')
         return redirect(url_for('second_factor_ui.login_step'))
     return redirect(_finish_login(user, sf.METHOD_TOTP))
+
+
+# --- the one-time re-enrolment code after an SU reset (#1045) ----------------
+
+#: One text for every refusal (unknown, wrong, expired, used, void): no oracle.
+REENROL_REFUSED_TEXT = ('Koden kunde inte godtas. Kontakta din vårdenhet för att '
+                        'få en ny kod.')
+
+
+@sf_ui_bp.route('/login/reenrol-code', methods=['GET', 'POST'])
+@rate_limit(max_requests=20, window_seconds=60)
+def reenrol_code():
+    user = _reenrol_pending_user()
+    if user is None:
+        flash('Logga in igen.', 'warning')
+        return redirect(url_for('frontend.login_page'))
+    if request.method == 'GET':
+        return render_template('second_factor_reenrol.html')
+    db = get_db()
+    try:
+        row = sf.redeem_reenrolment_code(db, user.guid, request.form.get('code', ''),
+                                         _cfg().get('SECRET_KEY', ''))
+    except sf.ReenrolmentRefused as e:
+        # Audited by reason; the typed value is never written anywhere.
+        audit('second_factor_reenrol_code_refused', user_guid=user.guid,
+              detail={'reason': e.reason}, ip=request.remote_addr)
+        if e.locked_now:
+            audit('second_factor_reenrol_code_locked', user_guid=user.guid,
+                  detail={'failures': sf.REENROL_MAX_FAILURES}, ip=request.remote_addr)
+        flash(REENROL_REFUSED_TEXT, 'error')
+        return render_template('second_factor_reenrol.html'), 400
+    pending = session.pop('sf_reenrol_pending', None) or {}
+    session['sf_reenrol'] = {'u': user.guid, 'r': row.guid, 'at': int(time.time())}
+    session['token'] = _issue(user)          # no claim: the factor is still to come
+    session['sf_resume'] = {'next': pending.get('next') or '',
+                            'state': pending.get('state') or ''}
+    audit('second_factor_reenrol_code_used', user_guid=user.guid,
+          detail={'reenrolment_guid': row.guid}, ip=request.remote_addr)
+    flash('Koden stämde. Lägg nu till en ny passkey eller autentiseringsapp.', 'success')
+    return redirect(url_for('second_factor_ui.manage'))
 
 
 # --- enrolment / management -------------------------------------------------

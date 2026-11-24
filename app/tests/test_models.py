@@ -47,6 +47,8 @@ class TestAllTablesCreated:
         'patient_link_codes',
         # #1050: the invite's name and wrong-personnummer count
         'patient_invite_details',
+        # #1045: the one-time code an SU second-factor reset issues
+        'second_factor_reenrolments',
     ]
 
     def test_all_tables_exist(self, db_session):

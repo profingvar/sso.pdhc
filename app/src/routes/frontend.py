@@ -804,6 +804,38 @@ def admin_reset_password():
     return redirect(url_for('frontend.admin_page'))
 
 
+@frontend_bp.route('/admin/second-factor-reset', methods=['POST'])
+@_require_su_login
+def admin_second_factor_reset():
+    """#1045: the SU page for a patient's lost second factor. Same service
+    call as POST /api/admin/users/<guid>/second-factor/reset. The one-time
+    re-enrolment code is RENDERED on the response page (no-store), never put
+    in a flash (the flash travels in the session cookie) and never audited."""
+    from src.services import second_factor as sf
+    from src.services.patient_link import _iso
+    user = _get_session_user()
+    db = get_db()
+    from src.models.user import User
+    target = db.query(User).filter_by(
+        guid=request.form.get('user_guid', '').strip()).first()
+    if target is None or target.user_type != 'patient':
+        flash('Patient account not found.', 'error')
+        return redirect(url_for('frontend.admin_page'))
+    removed, code, row = sf.su_reset(db, target, user.guid,
+                                     current_app.config.get('SECRET_KEY', ''))
+    audit('second_factor_reset', user_guid=user.guid,
+          detail={'target_guid': target.guid, 'removed': removed,
+                  'reenrolment_guid': row.guid,
+                  'reenrolment_expires_at': _iso(row.expires_at)},
+          ip=request.remote_addr)
+    resp = current_app.make_response(render_template(
+        'su_second_factor_reset.html', code=code, email=target.email,
+        removed=removed, expires_at=sf._aware(row.expires_at),
+        shown_once=sf.REENROL_SHOWN_ONCE_TEXT))
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 @frontend_bp.route('/admin/delete-organisation', methods=['POST'])
 @_require_su_login
 def admin_delete_org():

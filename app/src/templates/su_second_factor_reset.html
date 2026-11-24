@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Engångskod för ny andra faktor — sso.pdhc{% endblock %}
+{% block content %}
+<div style="max-width: 520px; margin: 2rem auto;">
+    <div class="card">
+        <h2>Andra faktorn är återställd</h2>
+        <p>Konto: <strong>{{ email }}</strong>. {{ removed }} faktor(er) togs bort och kontot är utloggat överallt.</p>
+        <p>Engångskod för att lägga till en ny andra faktor:</p>
+        <p style="font-size:2rem; letter-spacing:0.15em; text-align:center;"><code>{{ code }}</code></p>
+        <p class="flash flash-warning"><strong>{{ shown_once }}</strong></p>
+        <p class="text-muted">Koden gäller till {{ expires_at.strftime('%Y-%m-%d %H:%M') }} UTC (72 timmar),
+            kan användas en gång och blir ogiltig efter fem felaktiga försök. Patienten anger den efter
+            inloggning med lösenord. En ny återställning ersätter koden.</p>
+        <p><a href="/admin">Tillbaka</a></p>
+    </div>
+</div>
+{% endblock %}

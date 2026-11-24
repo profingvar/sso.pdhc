@@ -438,22 +438,39 @@ the patient must also be listed at that unit in eps, and the link records it.
 ### `GET /api/auth/second-factor`
 
 Own state: the blob's `second_factor` object plus `enrolled_methods`
-(`["passkey", "totp"]`).
+(`["passkey", "totp"]`) and `reenrolment_required` (true after an SU reset
+until a new factor is enrolled, #1045).
 
 ### `POST /api/admin/users/<user_guid>/second-factor/reset`
 
-SU admin only. Removes every passkey and the TOTP secret of the user and ends
-all their sessions. Response `200 {"user_guid": "…", "removed": <n>}`.
+SU admin only. Removes every passkey and the TOTP secret of the user, ends
+all their sessions, and issues a one-time re-enrolment code (#1045).
+Response (`Cache-Control: no-store`):
+
+```json
+{"user_guid": "…", "removed": 1,
+ "reenrolment_code": "ABCDE-23456",
+ "reenrolment_code_expires_at": "2026-11-27T10:00:00+00:00",
+ "message": "Visas bara en gång. Lämna koden till patienten efter att du har kontrollerat vem det är."}
+```
+
+The code is in this response and nowhere else (only a keyed hash is stored;
+it is not logged or audited). Until the patient has typed it at
+`/login/reenrol-code` after their password, the account gets no token and
+cannot enrol a factor; `POST /api/auth/login` answers
+`403 reenrolment_code_required`. Valid 72 h, once; five wrong entries void it;
+a new reset replaces it. The same reset is a button (**Återställ 2FA**) on the
+SU page for patient accounts.
 
 !!! warning
-    After a reset the account enrols a new factor with its password alone.
-    Verify who is asking before you reset.
+    Verify who the patient is before you hand over the code.
 
 ### Browser routes (session cookie, CSRF)
 
 The passkey ceremony needs the browser, so enrolment and the login step live on
 pages, not in the JSON API: `/second-factor` (manage), `/login/second-factor`
-(step-up after the password), `/patient-invite/<token>` (accept an invite),
+(step-up after the password), `/login/reenrol-code` (the one-time code after
+an SU reset, #1045), `/patient-invite/<token>` (accept an invite),
 `/patient-link/code` (patient), `/patient-link/invite` and
 `/patient-link/redeem` (care, from the dashboard). See *Architecture → Patient
 login*.

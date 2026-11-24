@@ -335,7 +335,7 @@ What only an SU can do:
 |---|---|---|
 | Change which patient an account is linked to | `PUT /api/admin/patient-links/<user_guid>` with `ips_patient_guid`, `reason` and, preferably, `care_unit_guid` | The guid must exist in eps. Name the care unit and eps must also list the patient there; leave it out and only existence is checked — so name it |
 | Remove a link | `DELETE /api/admin/patient-links/<user_guid>` with `reason` | The patient app then answers `not_linked` |
-| Reset a lost second factor | `POST /api/admin/users/<user_guid>/second-factor/reset` | Removes all passkeys and the authenticator secret and logs the user out everywhere. **Verify the person's identity first**: after a reset the password alone is enough to add a new factor |
+| Reset a lost second factor | **Återställ 2FA** on the user's row in the SU page, or `POST /api/admin/users/<user_guid>/second-factor/reset` | Removes all passkeys and the authenticator secret, logs the user out everywhere, and shows a **one-time code once** (#1045). *Visas bara en gång. Lämna koden till patienten efter att du har kontrollerat vem det är.* Give it in person or by telephone after checking who it is. The patient types it after their password, then adds a new factor; without it the account cannot log in or add one. Valid 72 h, once; five wrong entries void it; lost or void code → reset again (that replaces it) |
 
 **When linking is refused.** Every link is checked against eps.pdhc first.
 

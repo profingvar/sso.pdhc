@@ -9,7 +9,8 @@ What the repo already did, and what was followed:
 Neither fits everything here, so two functions:
 
 `keyed_hash(purpose, value)` — HMAC-SHA256 under a key derived from SECRET_KEY.
-  Used for the patient-invite token and the link code. The invite token is 256
+  Used for the patient-invite token, the link code and (#1045) the one-time
+  second-factor re-enrolment code an SU reset issues (about 49 bits). The invite token is 256
   random bits and plain sha256 would do; the LINK CODE is short (it is read out
   to a care unit), about 40 bits, and a plain hash of 40 bits can be searched
   offline by anyone holding a database dump. Keying it means a dump alone is

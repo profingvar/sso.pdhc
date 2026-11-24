@@ -32,12 +32,14 @@ from src.models.patient_link import (
 from src.models.patient_profile import PatientProfile
 # #1050: the invited patient's name and the wrong-personnummer counter.
 from src.models.patient_invite_detail import PatientInviteDetail
+# #1045: the one-time code an SU reset of the second factor issues.
+from src.models.second_factor_reenrolment import SecondFactorReenrolment
 
 __all__ = [
     'ReadGrant',
     'WebAuthnCredential', 'TotpSecret', 'LoginLockout',
     'PatientLink', 'PatientLinkHistory', 'PatientInvite', 'PatientLinkCode',
-    'PatientProfile', 'PatientInviteDetail',
+    'PatientProfile', 'PatientInviteDetail', 'SecondFactorReenrolment',
     'User', 'Patient', 'Professional', 'Organisation', 'OrganisationAudit',
     'UserOrganisation', 'Group', 'Membership', 'GroupProposal',
     'LeaderRequest', 'AccessRequest', 'Invite', 'RevokedToken', 'UserPhase',

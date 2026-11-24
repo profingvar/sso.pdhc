@@ -19,6 +19,7 @@ the site a credential is verified against. Unset means passkeys answer
 """
 import hmac
 import json
+import secrets
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -40,6 +41,7 @@ from webauthn.helpers.structs import (
 )
 
 from src.models.second_factor import TotpSecret, WebAuthnCredential
+from src.models.second_factor_reenrolment import SecondFactorReenrolment
 from src.services import secret_store
 
 METHOD_PASSKEY = 'passkey'
@@ -358,3 +360,159 @@ def reset_all(session, user_guid):
     n += session.query(TotpSecret).filter_by(
         user_guid=user_guid).delete(synchronize_session='fetch')
     return n
+
+
+# --- re-enrolment after an SU reset (#1045) ---------------------------------
+#
+# Operator decision 2026-11-24, "engångskod i display". Before this, a reset
+# account enrolled a new factor with its password alone, so whoever held the
+# password between the reset and the real patient's next login could take
+# the account over. Now the reset issues a one-time code, shown ONCE to the
+# SU, who hands it to the patient after checking who they are. Until a new
+# factor is enrolled the account is GATED:
+#
+#   * a password login gets no token at all, only the code page
+#     (routes/second_factor_ui.py, `begin_patient_login`);
+#   * the code is checked against THIS account, single use, 5 wrong entries
+#     void it, it expires after REENROL_CODE_TTL; unknown, wrong, expired,
+#     used and void all give the same refusal;
+#   * the right code lets THE SESSION THAT TYPED IT enrol (a session grant
+#     bound to this row's guid); any other session still meets the gate;
+#   * enrolling a factor completes the row and lifts the gate.
+#
+# The code is 10 characters from the link-code alphabet (no 0/O, 1/I/L, U),
+# shown as XXXXX-XXXXX: about 49 bits, read aloud in two groups. With five
+# tries per code a guess succeeds with probability 5/30^10. Only a keyed hash
+# of "<user_guid>:<code>" is stored (secret_store.keyed_hash).
+#
+# 72 hours: the code is given in person or by telephone, and the patient may
+# not be at their phone or computer that day; 72 h spans a weekend (Friday
+# afternoon to Monday) without a second call to the care unit. Longer would
+# leave a code written on paper valid for no gain; the guessing bound comes
+# from the five tries, not from the expiry.
+
+REENROL_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'
+REENROL_CODE_LENGTH = 10
+REENROL_CODE_TTL = timedelta(hours=72)
+REENROL_MAX_FAILURES = 5
+#: How long a session that typed the right code may take to enrol.
+REENROL_GRANT_SECONDS = 1800
+_REENROL_PURPOSE = 'second-factor-reenrolment'
+
+
+def _reenrol_hash(secret_key, user_guid, code):
+    return secret_store.keyed_hash(secret_key, _REENROL_PURPOSE, f'{user_guid}:{code}')
+
+
+def normalise_reenrol_code(value):
+    return ''.join(ch for ch in (value or '').upper() if ch.isalnum())
+
+
+def format_reenrol_code(code):
+    half = REENROL_CODE_LENGTH // 2
+    return f'{code[:half]}-{code[half:]}'
+
+
+def pending_reenrolment(session, user_guid):
+    """The open re-enrolment row (reset, factor not yet re-enrolled), or None."""
+    return session.query(SecondFactorReenrolment).filter_by(
+        user_guid=user_guid, completed_at=None).first()
+
+
+def reenrolment_required(session, user_guid):
+    return pending_reenrolment(session, user_guid) is not None
+
+
+def issue_reenrolment_code(session, user_guid, secret_key, issued_by=None):
+    """Called by the SU reset. Replaces any earlier row (and so any earlier
+    code, and any session that used one). Returns (formatted code, row). The
+    code is in the return value and nowhere else."""
+    session.query(SecondFactorReenrolment).filter_by(
+        user_guid=user_guid).delete(synchronize_session='fetch')
+    session.flush()
+    code = ''.join(secrets.choice(REENROL_CODE_ALPHABET)
+                   for _ in range(REENROL_CODE_LENGTH))
+    row = SecondFactorReenrolment(
+        user_guid=user_guid, code_hash=_reenrol_hash(secret_key, user_guid, code),
+        issued_by_user_guid=issued_by, expires_at=_utcnow() + REENROL_CODE_TTL,
+        failed_attempts=0)
+    session.add(row)
+    session.flush()
+    return format_reenrol_code(code), row
+
+
+class ReenrolmentRefused(Exception):
+    """One refusal for every reason. `reason` is for the audit log only and
+    must not reach the person at the keyboard (no oracle)."""
+
+    def __init__(self, reason, locked_now=False):
+        super().__init__(reason)
+        self.reason, self.locked_now = reason, locked_now
+
+
+def redeem_reenrolment_code(session, user_guid, code, secret_key):
+    """Check a typed code for THIS account. Returns the row (now used) or
+    raises ReenrolmentRefused. A wrong code is counted IN THE DATABASE and
+    COMMITTED here, because the caller's request ends in a refusal."""
+    row = pending_reenrolment(session, user_guid)
+    if row is None:
+        raise ReenrolmentRefused('no_code')
+    now = _utcnow()
+    if row.used_at is not None:
+        raise ReenrolmentRefused('used')
+    if row.voided_at is not None or (row.failed_attempts or 0) >= REENROL_MAX_FAILURES:
+        raise ReenrolmentRefused('void')
+    if _aware(row.expires_at) <= now:
+        raise ReenrolmentRefused('expired')
+    typed = normalise_reenrol_code(code)
+    if len(typed) == REENROL_CODE_LENGTH and hmac.compare_digest(
+            _reenrol_hash(secret_key, user_guid, typed), row.code_hash):
+        # Single use, also under a race: only the request whose UPDATE finds
+        # used_at still NULL wins.
+        won = session.query(SecondFactorReenrolment).filter_by(
+            id=row.id, used_at=None, voided_at=None).update(
+            {SecondFactorReenrolment.used_at: now}, synchronize_session=False)
+        if won != 1:
+            raise ReenrolmentRefused('used')
+        session.flush()
+        session.refresh(row)
+        return row
+    # Wrong: +1 in the database (not row.failed_attempts + 1 in Python, which
+    # loses failures other workers counted meanwhile), then re-read.
+    session.query(SecondFactorReenrolment).filter_by(id=row.id).update(
+        {SecondFactorReenrolment.failed_attempts:
+         func.coalesce(SecondFactorReenrolment.failed_attempts, 0) + 1},
+        synchronize_session=False)
+    session.flush()
+    session.refresh(row)
+    locked_now = False
+    if (row.failed_attempts or 0) >= REENROL_MAX_FAILURES and row.voided_at is None:
+        row.voided_at = now
+        locked_now = True
+    session.commit()
+    raise ReenrolmentRefused('wrong', locked_now=locked_now)
+
+
+REENROL_SHOWN_ONCE_TEXT = ('Visas bara en gång. Lämna koden till patienten efter att du '
+                           'har kontrollerat vem det är.')
+
+
+def su_reset(session, target, actor_guid, secret_key):
+    """The whole SU reset, shared by the JSON route and the SU page: remove
+    every factor, end every session, issue the re-enrolment code.
+    Returns (removed, formatted code, row). The caller audits WITHOUT the code."""
+    removed = reset_all(session, target.guid)
+    target.token_revocation_epoch = _utcnow()
+    code, row = issue_reenrolment_code(session, target.guid, secret_key,
+                                       issued_by=actor_guid)
+    return removed, code, row
+
+
+def complete_reenrolment(session, user_guid):
+    """A new factor was enrolled: lift the gate. Returns True if one was open."""
+    row = pending_reenrolment(session, user_guid)
+    if row is None:
+        return False
+    row.completed_at = _utcnow()
+    session.flush()
+    return True
