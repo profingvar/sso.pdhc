@@ -23,6 +23,8 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import pyotp
+from sqlalchemy import func
+from sqlalchemy.orm import object_session
 from webauthn import (
     generate_authentication_options, generate_registration_options,
     options_to_json, verify_authentication_response,
@@ -281,7 +283,19 @@ def _check_code(row, code, secret_key, now=None):
             break
     if matched is None or (row.last_used_step is not None
                            and matched <= row.last_used_step):
-        row.failed_attempts = (row.failed_attempts or 0) + 1
+        # #1045: counted IN THE DATABASE, then re-read. `row.failed_attempts
+        # + 1` in Python overwrote failures other workers committed meanwhile,
+        # so parallel wrong codes never reached the lock.
+        s = object_session(row)
+        if s is not None and row.id is not None:
+            s.query(TotpSecret).filter_by(id=row.id).update(
+                {TotpSecret.failed_attempts:
+                 func.coalesce(TotpSecret.failed_attempts, 0) + 1},
+                synchronize_session=False)
+            s.flush()
+            s.refresh(row, attribute_names=['failed_attempts'])
+        else:
+            row.failed_attempts = (row.failed_attempts or 0) + 1
         if row.failed_attempts >= TOTP_MAX_FAILURES:
             row.locked_until = now_dt + TOTP_LOCK
             row.failed_attempts = 0
