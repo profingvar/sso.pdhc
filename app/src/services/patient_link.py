@@ -40,6 +40,7 @@ from src.models.patient_link import (
 )
 from src.models.user import User
 from flask import current_app
+from sqlalchemy import func
 
 from src.services import eps_client, secret_store
 from src.services.activation_service import is_activated
@@ -325,13 +326,21 @@ def check_invite_personnummer(session, invite, personnummer, ip=None):
             raise EnrolmentRefused(503, e.code, [TRY_LATER_TEXT])
     if match:
         return normalised
-    detail = invite_detail(session, invite)
-    if detail is None:
-        detail = PatientInviteDetail(invite_guid=invite.guid, pnr_failures=0)
-        session.add(detail)
-    detail.pnr_failures = (detail.pnr_failures or 0) + 1
-    closed = detail.pnr_failures >= MAX_PNR_FAILURES
+    # #1045: the increment is done IN THE DATABASE. The row was loaded before
+    # the eps call (find_valid_invite), so `detail.pnr_failures + 1` in
+    # Python wrote back a stale count and lost every failure another worker
+    # counted meanwhile: parallel guesses then cost one failure, not N.
+    if invite_detail(session, invite) is None:
+        session.add(PatientInviteDetail(invite_guid=invite.guid, pnr_failures=0))
+        session.flush()
+    session.query(PatientInviteDetail).filter_by(invite_guid=invite.guid).update(
+        {PatientInviteDetail.pnr_failures:
+         func.coalesce(PatientInviteDetail.pnr_failures, 0) + 1},
+        synchronize_session=False)
     session.commit()
+    detail = session.query(PatientInviteDetail).filter_by(
+        invite_guid=invite.guid).populate_existing().one()
+    closed = (detail.pnr_failures or 0) >= MAX_PNR_FAILURES
     audit('patient_invite_pnr_mismatch',
           detail={'invite_guid': invite.guid, 'failures': detail.pnr_failures,
                   'closed': closed},

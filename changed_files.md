@@ -658,3 +658,5 @@ Survey: sso_app is the only service with a FILE audit log; the rest keep audit i
 /Users/martiningvar/T7_sidewinder/sso.pdhc/app/docs/docs/architecture.md  (#1050)
 /Users/martiningvar/T7_sidewinder/sso.pdhc/progress.md  (#1050)
 /Users/martiningvar/T7_sidewinder/sso.pdhc/changed_files.md  (#1050)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/src/services/patient_link.py  (#1045 invite pnr counter: atomic increment)
+/Users/martiningvar/T7_sidewinder/sso.pdhc/app/tests/test_invite_pnr_counter_1045.py  (#1045)
