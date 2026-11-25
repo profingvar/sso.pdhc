@@ -1,4 +1,6 @@
 """Second factor for patient accounts (#1040): passkey first, TOTP as reserve.
+Since #1055 (record.pdhc decision D4: a signing needs a second factor) the same
+mechanism serves PROFESSIONALS, optionally; see routes/second_factor_ui.py.
 
 The cryptography is not ours. Passkeys go through `webauthn` (py_webauthn),
 TOTP through `pyotp`; this module holds only the policy around them:
@@ -113,7 +115,8 @@ def claim_from_payload(token_payload):
 
 
 def second_factor_for_blob(session, user, token_payload):
-    """The `second_factor` object of the access blob (patient accounts).
+    """The `second_factor` object of the access blob (patient accounts, and
+    since #1055 professional accounts, with the same semantics).
 
     `verified` is about the token that carried this request. It additionally
     requires the account to still be enrolled, so a factor reset by an SU
@@ -495,6 +498,16 @@ def redeem_reenrolment_code(session, user_guid, code, secret_key):
 
 REENROL_SHOWN_ONCE_TEXT = ('Visas bara en gång. Lämna koden till patienten efter att du '
                            'har kontrollerat vem det är.')
+#: #1055: the same instruction when the account is a professional's.
+REENROL_SHOWN_ONCE_TEXT_PROFESSIONAL = ('Visas bara en gång. Lämna koden till personen '
+                                        'efter att du har kontrollerat vem det är.')
+
+
+def reenrol_shown_once_text(target):
+    """The shown-once line for this account (a patient's text is unchanged)."""
+    if getattr(target, 'user_type', None) == 'patient':
+        return REENROL_SHOWN_ONCE_TEXT
+    return REENROL_SHOWN_ONCE_TEXT_PROFESSIONAL
 
 
 def su_reset(session, target, actor_guid, secret_key):

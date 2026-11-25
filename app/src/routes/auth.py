@@ -83,18 +83,25 @@ def login():
     # issued: there the factor is asked for (or enrolled) before the service
     # gets one. Without `next` the JSON token below is unchanged: it says
     # `second_factor.verified: false`, and consumers refuse it (contract s2.2).
-    if next_url and user.user_type == 'patient':
-        audit('login_patient_sent_to_second_factor', user_guid=user.guid,
+    # #1055: the same for a PROFESSIONAL who has enrolled a factor (or whose
+    # factor an SU reset): the password alone must not hand a service a token.
+    # A professional WITHOUT a factor is not affected (`professional_needs_step`).
+    from src.routes.second_factor_ui import professional_needs_step
+    needs_step = user.user_type == 'patient' or professional_needs_step(user)
+    if next_url and needs_step:
+        audit('login_patient_sent_to_second_factor' if user.user_type == 'patient'
+              else 'login_sent_to_second_factor', user_guid=user.guid,
               ip=request.remote_addr)
         params = {'next': next_url}
         if state:
             params['state'] = state
         return redirect('/login?' + urlencode(params))
 
-    # #1045: a patient whose second factor an SU reset gets NO token from the
-    # password alone until the one-time re-enrolment code has been typed (in
-    # the browser, /login -> /login/reenrol-code). Fail closed here too.
-    if user.user_type == 'patient':
+    # #1045: a patient (#1055: or a professional) whose second factor an SU
+    # reset gets NO token from the password alone until the one-time
+    # re-enrolment code has been typed (in the browser, /login ->
+    # /login/reenrol-code). Fail closed here too.
+    if needs_step:
         from src.services import second_factor as _sf
         if (not _sf.is_enrolled(session, user.guid)
                 and _sf.reenrolment_required(session, user.guid)):

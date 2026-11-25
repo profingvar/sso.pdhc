@@ -178,6 +178,12 @@ def build_access_blob(user, session, session_id=None, token_payload=None):
         from flask import current_app
         from src.services.professional_qualification import for_blob as _qual
         blob.update(_qual(session, professional, current_app.config))
+        # #1055 (record.pdhc D4): the professional's second factor, the SAME
+        # object and semantics as a patient's: enrolled = the account,
+        # verified = THIS token. Before the activation gate (identity, not
+        # access) and not a legacy field, so always present for a professional.
+        from src.services.second_factor import second_factor_for_blob
+        blob['second_factor'] = second_factor_for_blob(session, user, token_payload)
 
         # S9 (#411) activation gate: an unactivated professional gets a
         # NO-ACCESS blob — identity only, every scope/phase field empty —

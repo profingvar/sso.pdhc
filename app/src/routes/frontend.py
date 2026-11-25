@@ -235,7 +235,8 @@ def login_page():
     # Auto-redirect: if already logged in and next is provided
     if next_url and _get_session_user() is not None:
         from urllib.parse import urlencode
-        from src.routes.second_factor_ui import callback_allowed, patient_handshake
+        from src.routes.second_factor_ui import (callback_allowed, patient_handshake,
+                                                 professional_needs_step)
         # #1040: this branch minted a token and redirected to ANY `next`,
         # with no allowlist check — only the POST branch below had one. A
         # link to /login?next=<anywhere> opened by a logged-in user handed a
@@ -251,6 +252,12 @@ def login_page():
         if user.user_type == 'patient':
             # #1040: a patient's token reaches a service only after a second
             # factor, and carries the claim that says so.
+            return patient_handshake(user, next_url, state)
+        if professional_needs_step(user):
+            # #1055: a professional WITH a factor (or an SU reset pending) is
+            # handled like a patient: the service token carries the session's
+            # claim, or the session steps up first. Without a factor: below,
+            # unchanged.
             return patient_handshake(user, next_url, state)
         token = issue_token(user.guid, secret, expiry_hours=expiry_hours)
         params = {'token': token}
@@ -304,6 +311,13 @@ def _login_post(next_url, state):
         # token is issued here when a second factor is enrolled; see
         # routes/second_factor_ui.py for the rule.
         from src.routes.second_factor_ui import begin_patient_login
+        return begin_patient_login(user, next_url, state, email=email)
+
+    from src.routes.second_factor_ui import begin_patient_login, professional_needs_step
+    if professional_needs_step(user):
+        # #1055: a professional who has ENROLLED a factor (or whose factor an
+        # SU reset) gets no token for the password alone. One without a factor
+        # carries on below exactly as before: enrolment is never forced.
         return begin_patient_login(user, next_url, state, email=email)
 
     secret = current_app.config.get('SECRET_KEY', '')
@@ -457,6 +471,9 @@ def dashboard():
     from src.services import second_factor as _sf
     patient_app = None
     link_units = []
+    # #1055: every account sees its own factor state; the link is the
+    # "Säkerhet / andra faktor" page.
+    second_factor_enrolled = _sf.is_enrolled(db, user.guid)
     if user.user_type == 'patient':
         patient_app = {
             'linked': _pl.current_link(db, user.guid) is not None,
@@ -473,7 +490,8 @@ def dashboard():
     return render_template('dashboard.html',
                            professional=professional, patient=patient,
                            groups=groups, org_names=org_names,
-                           patient_app=patient_app, link_units=link_units)
+                           patient_app=patient_app, link_units=link_units,
+                           second_factor_enrolled=second_factor_enrolled)
 
 
 # ---------------------------------------------------------------------------
@@ -814,7 +832,8 @@ def admin_reset_password():
 @frontend_bp.route('/admin/second-factor-reset', methods=['POST'])
 @_require_su_login
 def admin_second_factor_reset():
-    """#1045: the SU page for a patient's lost second factor. Same service
+    """#1045: the SU page for a lost second factor (a patient's, and since
+    #1055 a professional's). Same service
     call as POST /api/admin/users/<guid>/second-factor/reset. The one-time
     re-enrolment code is RENDERED on the response page (no-store), never put
     in a flash (the flash travels in the session cookie) and never audited."""
@@ -825,8 +844,8 @@ def admin_second_factor_reset():
     from src.models.user import User
     target = db.query(User).filter_by(
         guid=request.form.get('user_guid', '').strip()).first()
-    if target is None or target.user_type != 'patient':
-        flash('Patient account not found.', 'error')
+    if target is None or target.user_type not in ('patient', 'professional'):
+        flash('Account not found.', 'error')
         return redirect(url_for('frontend.admin_page'))
     removed, code, row = sf.su_reset(db, target, user.guid,
                                      current_app.config.get('SECRET_KEY', ''))
@@ -838,7 +857,8 @@ def admin_second_factor_reset():
     resp = current_app.make_response(render_template(
         'su_second_factor_reset.html', code=code, email=target.email,
         removed=removed, expires_at=sf._aware(row.expires_at),
-        shown_once=sf.REENROL_SHOWN_ONCE_TEXT))
+        shown_once=sf.reenrol_shown_once_text(target),
+        is_patient=(target.user_type == 'patient')))
     resp.headers['Cache-Control'] = 'no-store'
     return resp
 

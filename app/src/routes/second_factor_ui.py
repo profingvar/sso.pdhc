@@ -26,7 +26,27 @@ The login rule for a PATIENT account, in one place:
                                        THIS session enrol. Without the code:
                                        no token, no enrolment, no handshake.
 
-Professionals are untouched: they have no second factor in this stage.
+PROFESSIONALS (#1055, record.pdhc stage 3, decision D4): the same factor,
+the same models, the same pages, but OPTIONAL. Enrolment is never forced,
+because every PDHC service relies on a professional's SSO login:
+
+  password OK, nothing enrolled     -> exactly as before #1055: a token
+  (and no SU reset pending)            without the claim, straight on to the
+                                       dashboard or the service. Nothing here
+                                       is called (`professional_needs_step`).
+  password OK, factor enrolled      -> the patient row above: `sf_pending`,
+                                       the factor, then the verified token.
+  handshake to a service (`next`)   -> an enrolled professional's service
+                                       token carries the session's claim; an
+                                       unverified session steps up first.
+  factor RESET by an SU             -> the one-time code page, as for a
+                                       patient. The difference: for a
+                                       professional the right code ENDS the
+                                       reset (`complete_reenrolment`), so the
+                                       account is back to "nothing enrolled"
+                                       and logs in with the password; adding a
+                                       new factor is offered, not required. A
+                                       patient's reset ends only on enrolment.
 """
 import time
 from urllib.parse import urlencode
@@ -139,8 +159,19 @@ def _reenrol_pending_user():
     return get_db().query(User).filter_by(guid=pending.get('u')).first()
 
 
+def professional_needs_step(user):
+    """#1055: does this PROFESSIONAL's login go through the second-factor
+    pages? Only when a factor is enrolled, or an SU reset is waiting for its
+    one-time code. A professional with neither logs in exactly as before."""
+    if user is None or user.user_type == 'patient':
+        return False
+    db = get_db()
+    return sf.is_enrolled(db, user.guid) or sf.reenrolment_required(db, user.guid)
+
+
 def begin_patient_login(user, next_url, state, email=None):
-    """Called by /login once a PATIENT's password is accepted."""
+    """Called by /login once a PATIENT's password is accepted, and (#1055)
+    once a PROFESSIONAL's is accepted when `professional_needs_step`."""
     db = get_db()
     session.pop('token', None)
     session.pop('wa_auth', None)
@@ -176,7 +207,8 @@ def begin_patient_login(user, next_url, state, email=None):
 
 
 def patient_handshake(user, next_url, state):
-    """Called by /login when a logged-in PATIENT arrives with `next`.
+    """Called by /login when a logged-in PATIENT arrives with `next`, and
+    (#1055) a logged-in PROFESSIONAL for whom `professional_needs_step`.
 
     Returns a redirect. A token is minted for the service only when the
     session token is second-factor verified; the claim is carried over, so the
@@ -243,6 +275,11 @@ def _patient_or_none():
     return user if user is not None and user.user_type == 'patient' else None
 
 
+def _account_or_none():
+    """#1055: the factor pages serve patients AND professionals (SU included)."""
+    return _session_user()
+
+
 # --- login step-up ----------------------------------------------------------
 
 @sf_ui_bp.route('/login/second-factor', methods=['GET'])
@@ -254,6 +291,7 @@ def login_step():
     methods = sf.enrolled_methods(get_db(), user.guid)
     return render_template(
         'second_factor_login.html', methods=methods,
+        is_patient=(user.user_type == 'patient'),
         passkey_ready=('passkey' in methods and sf.passkeys_configured(_cfg())))
 
 
@@ -323,7 +361,8 @@ def reenrol_code():
         flash('Logga in igen.', 'warning')
         return redirect(url_for('frontend.login_page'))
     if request.method == 'GET':
-        return render_template('second_factor_reenrol.html')
+        return render_template('second_factor_reenrol.html',
+                               is_patient=(user.user_type == 'patient'))
     db = get_db()
     try:
         row = sf.redeem_reenrolment_code(db, user.guid, request.form.get('code', ''),
@@ -336,14 +375,27 @@ def reenrol_code():
             audit('second_factor_reenrol_code_locked', user_guid=user.guid,
                   detail={'failures': sf.REENROL_MAX_FAILURES}, ip=request.remote_addr)
         flash(REENROL_REFUSED_TEXT, 'error')
-        return render_template('second_factor_reenrol.html'), 400
+        return render_template('second_factor_reenrol.html',
+                               is_patient=(user.user_type == 'patient')), 400
     pending = session.pop('sf_reenrol_pending', None) or {}
     session['sf_reenrol'] = {'u': user.guid, 'r': row.guid, 'at': int(time.time())}
     session['token'] = _issue(user)          # no claim: the factor is still to come
-    session['sf_resume'] = {'next': pending.get('next') or '',
-                            'state': pending.get('state') or ''}
     audit('second_factor_reenrol_code_used', user_guid=user.guid,
           detail={'reenrolment_guid': row.guid}, ip=request.remote_addr)
+    if user.user_type != 'patient':
+        # #1055: a professional's factor is optional, so the code ends the
+        # reset here and the account is back to "nothing enrolled" (password
+        # login, as for any professional without a factor). Waiting for a new
+        # enrolment, as for a patient, would shut a professional out of every
+        # PDHC service once the 30-minute session grant lapsed.
+        sf.complete_reenrolment(db, user.guid)
+        session.pop('sf_reenrol', None)
+        flash('Koden stämde. Du är inloggad. Lägg gärna till en ny passkey eller '
+              'autentiseringsapp; den behövs för att signera.', 'success')
+        return redirect(_destination(session['token'], pending)
+                        if pending.get('next') else url_for('second_factor_ui.manage'))
+    session['sf_resume'] = {'next': pending.get('next') or '',
+                            'state': pending.get('state') or ''}
     flash('Koden stämde. Lägg nu till en ny passkey eller autentiseringsapp.', 'success')
     return redirect(url_for('second_factor_ui.manage'))
 
@@ -361,13 +413,14 @@ def _manage_page(user, totp_setup=None):
         passkey_ready=sf.passkeys_configured(_cfg()),
         totp_setup=totp_setup,
         resume_pending=bool((session.get('sf_resume') or {}).get('next')),
+        is_patient=(user.user_type == 'patient'),
         linked=pl.current_link(db, user.guid) is not None,
         patientapp_url=_cfg().get('PATIENTAPP_URL') or '')
 
 
 @sf_ui_bp.route('/second-factor', methods=['GET'])
 def manage():
-    user = _patient_or_none()
+    user = _account_or_none()
     if user is None:
         return redirect(url_for('frontend.login_page'))
     return _manage_page(user)
@@ -376,7 +429,7 @@ def manage():
 @sf_ui_bp.route('/second-factor/passkey/options', methods=['POST'])
 @rate_limit(max_requests=20, window_seconds=60)
 def enrol_passkey_options():
-    user = _patient_or_none()
+    user = _account_or_none()
     if user is None:
         return jsonify({"error": "not_logged_in", "message": "Logga in igen."}), 401
     if not _may_change_factors(user):
@@ -393,7 +446,7 @@ def enrol_passkey_options():
 @sf_ui_bp.route('/second-factor/passkey/verify', methods=['POST'])
 @rate_limit(max_requests=20, window_seconds=60)
 def enrol_passkey_verify():
-    user = _patient_or_none()
+    user = _account_or_none()
     if user is None:
         return jsonify({"error": "not_logged_in", "message": "Logga in igen."}), 401
     challenge = session.pop('wa_reg', None)
@@ -415,7 +468,7 @@ def enrol_passkey_verify():
 @sf_ui_bp.route('/second-factor/totp/start', methods=['POST'])
 @rate_limit(max_requests=20, window_seconds=60)
 def enrol_totp_start():
-    user = _patient_or_none()
+    user = _account_or_none()
     if user is None:
         return redirect(url_for('frontend.login_page'))
     if not _may_change_factors(user):
@@ -435,7 +488,7 @@ def enrol_totp_start():
 @sf_ui_bp.route('/second-factor/totp/confirm', methods=['POST'])
 @rate_limit(max_requests=20, window_seconds=60)
 def enrol_totp_confirm():
-    user = _patient_or_none()
+    user = _account_or_none()
     if user is None:
         return redirect(url_for('frontend.login_page'))
     if not _may_change_factors(user):
@@ -456,7 +509,7 @@ def enrol_totp_confirm():
 
 @sf_ui_bp.route('/second-factor/remove', methods=['POST'])
 def remove_factor():
-    user = _patient_or_none()
+    user = _account_or_none()
     if user is None:
         return redirect(url_for('frontend.login_page'))
     if session_claim() is None:

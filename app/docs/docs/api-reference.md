@@ -101,6 +101,13 @@ service gets a token. Audited `login_patient_sent_to_second_factor`. Without
 `next` a patient still gets the JSON token, which says
 `second_factor.verified: false`.
 
+**#1055: the same for a professional who has ENROLLED a second factor** (or
+whose factor an SU reset): with `next`, a `302` to `/login?next=…` and no token
+(audited `login_sent_to_second_factor`); without `next`, a token with
+`second_factor.verified: false`; after an SU reset, `403
+reenrolment_code_required` until the code is typed in the browser. A
+professional with no factor is unaffected.
+
 **Errors:**
 
 | Code | Error | Description |

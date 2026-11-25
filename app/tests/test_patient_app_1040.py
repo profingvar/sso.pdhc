@@ -319,9 +319,13 @@ def test_patient_blob_carries_both_objects_before_anything_is_set_up(world):
                                      'method': None, 'verified_at': None}
 
 
-def test_professional_blob_is_unchanged(world):
+def test_professional_blob_has_no_patient_link(world):
+    # #1055: a professional's blob now carries `second_factor` too (record.pdhc
+    # D4); `patient_link` stays patient-only.
     blob = _blob(world['app'], world['pro_a_h']['Authorization'][7:])
-    assert 'patient_link' not in blob and 'second_factor' not in blob
+    assert 'patient_link' not in blob
+    assert blob['second_factor'] == {'enrolled': False, 'verified': False,
+                                     'method': None, 'verified_at': None}
 
 
 # =============================================================================

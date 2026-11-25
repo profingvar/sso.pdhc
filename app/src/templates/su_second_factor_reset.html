@@ -9,7 +9,7 @@
         <p style="font-size:2rem; letter-spacing:0.15em; text-align:center;"><code>{{ code }}</code></p>
         <p class="flash flash-warning"><strong>{{ shown_once }}</strong></p>
         <p class="text-muted">Koden gäller till {{ expires_at.strftime('%Y-%m-%d %H:%M') }} UTC (72 timmar),
-            kan användas en gång och blir ogiltig efter fem felaktiga försök. Patienten anger den efter
+            kan användas en gång och blir ogiltig efter fem felaktiga försök. {% if is_patient %}Patienten{% else %}Personen{% endif %} anger den efter
             inloggning med lösenord. En ny återställning ersätter koden.</p>
         <p><a href="/admin">Tillbaka</a></p>
     </div>

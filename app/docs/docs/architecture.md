@@ -442,6 +442,29 @@ What SSO itself enforces:
 | lost device: SU reset removes every factor, ends all sessions and issues a one-time re-enrolment code shown once to the SU | `POST /api/admin/users/<guid>/second-factor/reset`, SU page `/admin/second-factor-reset` |
 | after a reset, a password login gets NO token until the one-time code is typed; only the session that typed it may enrol; the code is single use, void after 5 wrong entries, expires after 72 h, and a new reset replaces it | `begin_patient_login`, `/login/reenrol-code`, `_may_change_factors`, `second_factor.redeem_reenrolment_code` |
 
+### Professionals: the same second factor, optional (#1055)
+
+record.pdhc decision D4: a signing needs a second factor. Professionals (SU
+admins included) use the SAME models, pages and routes (`/second-factor`,
+"Säkerhet / andra faktor", linked from the Dashboard). Enrolment is NOT forced,
+because every PDHC service relies on a professional's SSO login:
+
+| professional | `/login` (HTML) | `POST /api/auth/login` | logged-in `/login?next=` |
+|---|---|---|---|
+| no factor, no reset pending | as before #1055: token, no claim | as before | token, no claim |
+| factor enrolled | no token; `/login/second-factor`; then a token WITH the claim | with `next`: 302 to `/login?next=` (no token, audited `login_sent_to_second_factor`); without: token with `verified: false` | session verified: token carrying the claim; else step up first |
+| SU reset pending | `/login/reenrol-code`; no token | 403 `reenrolment_code_required` | the code page |
+
+The decision is `second_factor_ui.professional_needs_step` (enrolled, or reset
+pending). One deliberate difference from patients: for a professional the right
+one-time code ENDS the reset (`complete_reenrolment` at redeem), so the account
+is back to "no factor" and logs in with the password; a new factor is offered,
+not required. A patient's reset ends only on enrolment. Waiting for enrolment
+would shut a professional out of every service once the 30-minute grant lapsed.
+
+The blob carries `second_factor` for every professional (also while activation
+is pending), same object and semantics as for a patient; not a legacy field.
+
 **Trust on first use, stated.** An account with no factor enrols one with its
 password alone. For an invited account the one-time invite link is what binds
 the person; for a self-registered one, the link code handed to the care unit
@@ -750,6 +773,10 @@ Downstream services use it to make authorization decisions.
 | `second_factor.verified` | THIS token was issued after a second factor was presented. `false` for a password-only token, even on an enrolled account |
 | `second_factor.method` | `"passkey"` or `"totp"` when verified, else `null` |
 | `second_factor.verified_at` | ISO-8601 UTC when verified, else `null` |
+
+Since #1055 a professional's blob carries the same `second_factor` object
+(always present). A consumer that needs a second factor from a professional
+(record.pdhc signing, D4) checks `second_factor.verified`.
 
 A consumer that serves patient data requires **all** of: `user_type ==
 "patient"`, `second_factor.verified`, `must_change_password` false, and

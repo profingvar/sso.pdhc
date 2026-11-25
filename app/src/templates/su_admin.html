@@ -352,6 +352,16 @@
                         <button type="submit" class="btn btn-sm btn-secondary"
                             title="Tappad enhet: tar bort patientens passkeys och autentiseringsapp, loggar ut överallt och visar en engångskod som patienten behöver för att lägga till en ny faktor.">Återställ 2FA</button>
                     </form>
+                    {% elif u.user_type == 'professional' %}
+                    {# #1055: the same reset for a professional. The code lets
+                       them log in again; a new factor is then optional. #}
+                    <form method="post" action="/admin/second-factor-reset" style="display:inline;"
+                          onsubmit="return confirm('Återställ andra faktorn för {{ u.email }}? Kontrollera först vem personen är. En engångskod visas en gång efteråt.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="user_guid" value="{{ u.user_guid }}">
+                        <button type="submit" class="btn btn-sm btn-secondary"
+                            title="Tappad enhet: tar bort personens passkeys och autentiseringsapp, loggar ut överallt och visar en engångskod som personen behöver för att logga in igen.">Återställ 2FA</button>
+                    </form>
                     {% endif %}
                     {# Ticket #44: bulk session flush. Bumps the user's
                        token_revocation_epoch so every outstanding JWT is

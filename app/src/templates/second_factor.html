@@ -2,12 +2,28 @@
 {% block title %}Andra faktor — sso.pdhc{% endblock %}
 {% block content %}
 <meta name="csrf-token" content="{{ csrf_token() }}">
+{% if is_patient %}
 <h2 class="mb-2">Andra faktor</h2>
+{% else %}
+<h2 class="mb-2">Säkerhet / andra faktor</h2>
+{% endif %}
 
-{% if not enrolled %}
+{% if not enrolled and is_patient %}
 <div class="flash flash-warning">
     Du behöver lägga till en andra faktor innan du kan använda patientappen.
     Välj passkey (rekommenderas) eller en autentiseringsapp.
+</div>
+{% elif not enrolled %}
+<div class="flash flash-warning">
+    Du har ingen andra faktor. Du kan logga in med lösenord som tidigare, men för att
+    signera (till exempel i record.pdhc) behövs en andra faktor. Välj passkey
+    (rekommenderas) eller en autentiseringsapp. När den är tillagd frågar inloggningen
+    efter den varje gång.
+</div>
+{% elif not is_patient and not verified %}
+<div class="flash flash-warning">
+    Den här inloggningen gjordes utan andra faktor. Logga ut och in igen med din
+    andra faktor för att kunna ändra den eller signera.
 </div>
 {% elif resume_pending %}
 <div class="flash flash-success">Klart. Du skickas vidare när du har lagt till din andra faktor.</div>
@@ -87,7 +103,7 @@
     </div>
 </div>
 
-{% if enrolled %}
+{% if enrolled and is_patient %}
 <div class="card">
     <h3>Patientappen</h3>
     {% if not verified %}

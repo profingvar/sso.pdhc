@@ -5,7 +5,11 @@
 <div style="max-width: 440px; margin: 3rem auto;">
     <div class="card">
         <h2>Bekräfta att det är du</h2>
+        {% if is_patient %}
         <p class="text-muted">Lösenordet stämde. Som patient loggar du också in med en andra faktor.</p>
+        {% else %}
+        <p class="text-muted">Lösenordet stämde. Ditt konto har en andra faktor, så den behövs också.</p>
+        {% endif %}
 
         {% if 'passkey' in methods %}
             {% if passkey_ready %}
@@ -31,7 +35,7 @@
         {% endif %}
 
         <p class="text-muted mt-2" style="font-size:0.85rem;">
-            Har du tappat din enhet? Kontakta din vårdenhet. <a href="/login">Avbryt</a>
+            {% if is_patient %}Har du tappat din enhet? Kontakta din vårdenhet.{% else %}Har du tappat din enhet? Kontakta en SU-administratör, som kan återställa din andra faktor.{% endif %} <a href="/login">Avbryt</a>
         </p>
     </div>
 </div>

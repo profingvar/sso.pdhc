@@ -221,6 +221,16 @@ is created.
   works once and for 72 hours; if it does not work, contact your care unit
   for a new one.
 
+### Professionals: Säkerhet / andra faktor (#1055)
+
+A professional (SU admins too) can add the same second factor from
+**Dashboard → Säkerhet / andra faktor** (`/second-factor`). It is optional:
+without one you log in with your password as before. A second factor is needed
+to **sign** (record.pdhc). Once added, every login asks for it after the
+password. Lost your device? Contact an SU administrator, who resets it and
+gives you a one-time code; type it after your password and you are logged in
+again (adding a new factor is then up to you).
+
 ### Dashboard
 
 The patient dashboard shows:

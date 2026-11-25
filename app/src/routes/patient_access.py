@@ -206,7 +206,7 @@ def su_reset_second_factor(user_guid):
                     # Shown ONCE. Only a keyed hash is stored.
                     "reenrolment_code": code,
                     "reenrolment_code_expires_at": pl._iso(row.expires_at),
-                    "message": sf.REENROL_SHOWN_ONCE_TEXT})
+                    "message": sf.reenrol_shown_once_text(target)})
     resp.headers['Cache-Control'] = 'no-store'
     return resp, 200
 

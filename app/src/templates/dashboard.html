@@ -39,6 +39,15 @@
 
 {% if current_user.user_type == 'professional' %}
 <div class="card">
+    <h3>Säkerhet / andra faktor</h3>
+    <p><strong>Andra faktor:</strong>
+        {% if second_factor_enrolled %}tillagd{% else %}saknas (behövs för att signera){% endif %}
+        — <a href="/second-factor">hantera</a></p>
+</div>
+{% endif %}
+
+{% if current_user.user_type == 'professional' %}
+<div class="card">
     <h3>My Groups</h3>
     {% if groups %}
         <table>

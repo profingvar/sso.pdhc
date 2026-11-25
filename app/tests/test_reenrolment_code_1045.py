@@ -283,6 +283,7 @@ def test_the_su_page_shows_the_code_once_and_not_in_a_flash(world):
     p = app.test_client()
     _password_login(p)
     assert _type(p, code).status_code == 302
-    # Professionals have no second factor: the page refuses them by name.
+    # #1055: professionals have a (optional) second factor now, and the same
+    # page resets it; see test_professional_second_factor_1055.py.
     r = su.post('/admin/second-factor-reset', data={'user_guid': world['pro_a']})
-    assert r.status_code == 302 and _row(world)['user_guid'] == world['pat']
+    assert r.status_code == 200
